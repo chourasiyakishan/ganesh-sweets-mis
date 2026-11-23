@@ -1,0 +1,341 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+
+  /* Sidebar */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+
+  /* Charts */
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+
+  /* Core */
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Saffron Brand Colors */
+  --color-saffron: var(--saffron);
+  --color-saffron-light: var(--saffron-light);
+  --color-saffron-dark: var(--saffron-dark);
+  --color-saffron-container: var(--saffron-container);
+  --color-deep-green: var(--deep-green);
+  --color-deep-green-light: var(--deep-green-light);
+  --color-deep-green-container: var(--deep-green-container);
+  --color-warm-surface: var(--warm-surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-outline-soft: var(--outline-soft);
+  --color-outline-variant: var(--outline-variant);
+  --color-table-header: var(--table-header);
+  --color-table-header-text: var(--table-header-text);
+  --color-gold: var(--gold);
+  --color-gold-container: var(--gold-container);
+}
+
+/* ===== LIGHT MODE (Royal Kesar Saffron & Pista Emerald) ===== */
+:root {
+  /* Core Colors — Crisp Warm Professional Canvas */
+  --background: #fbfbfa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+
+  /* Primary — Royal Kesar Saffron */
+  --primary: #d9531e;
+  --primary-foreground: #ffffff;
+
+  /* Secondary — Fresh Pista Emerald */
+  --secondary: #0b7a4b;
+  --secondary-foreground: #ffffff;
+
+  /* Muted */
+  --muted: #f4efe9;
+  --muted-foreground: #5e544c;
+
+  /* Accent */
+  --accent: #eee8e0;
+  --accent-foreground: #18181b;
+
+  /* Destructive — Red for errors/delete */
+  --destructive: #dc2626;
+
+  /* Borders & Inputs — Crisp, tailored warm borders */
+  --border: #e2ddd5;
+  --input: #d6cfc4;
+  --ring: #d9531e;
+
+  /* Radius */
+  --radius: 0.5rem;
+
+  /* Charts — Saffron, Emerald, Gold, Crimson, Orange */
+  --chart-1: #d9531e;
+  --chart-2: #0b7a4b;
+  --chart-3: #f59e0b;
+  --chart-4: #dc2626;
+  --chart-5: #fb923c;
+
+  /* Sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #d9531e;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dcfce7;
+  --sidebar-accent-foreground: #0b7a4b;
+  --sidebar-border: #e2ddd5;
+  --sidebar-ring: #d9531e;
+
+  /* === Brand Tokens === */
+  --saffron: #d9531e;
+  --saffron-light: #fb923c;
+  --saffron-dark: #b83e10;
+  --saffron-container: #ffede0;
+  --deep-green: #0b7a4b;
+  --deep-green-light: #34d399;
+  --deep-green-container: #dcfce7;
+  --warm-surface: #fbfbfa;
+  --surface-dim: #ede8e1;
+  --outline-soft: #786f66;
+  --outline-variant: #e2ddd5;
+  --table-header: #0b5b38;
+  --table-header-text: #ffffff;
+
+  /* Tertiary Accent — Shuddh Ghee Gold */
+  --gold: #d97706;
+  --gold-container: #fef3c7;
+}
+
+/* ===== DARK MODE ===== */
+.dark {
+  --background: #111413;
+  --foreground: #f4f4f5;
+  --card: #181d19;
+  --card-foreground: #f4f4f5;
+  --popover: #1c221e;
+  --popover-foreground: #f4f4f5;
+
+  /* Primary — Punchy Glowing Saffron */
+  --primary: #fa6d28;
+  --primary-foreground: #2a0f02;
+
+  /* Secondary — Pista Green (punchy and alive) */
+  --secondary: #10b981;
+  --secondary-foreground: #022315;
+
+  /* Muted */
+  --muted: #222924;
+  --muted-foreground: #a1a1aa;
+
+  /* Accent */
+  --accent: #29322c;
+  --accent-foreground: #ffffff;
+
+  /* Destructive */
+  --destructive: #f87171;
+
+  /* Borders & Inputs — Defined, clean dark borders */
+  --border: #2a342c;
+  --input: #364238;
+  --ring: #fa6d28;
+
+  /* Charts */
+  --chart-1: #fa6d28;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #f87171;
+  --chart-5: #fdba74;
+
+  /* Sidebar */
+  --sidebar: #131714;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-primary: #fa6d28;
+  --sidebar-primary-foreground: #2a0f02;
+  --sidebar-accent: #1e2e23;
+  --sidebar-accent-foreground: #34d399;
+  --sidebar-border: #242c26;
+  --sidebar-ring: #fa6d28;
+
+  /* Brand Tokens (Dark) */
+  --saffron: #fa6d28;
+  --saffron-light: #fdba74;
+  --saffron-dark: #d9531e;
+  --saffron-container: #3a1a0a;
+  --deep-green: #10b981;
+  --deep-green-light: #6ee7b7;
+  --deep-green-container: #0d3822;
+  --warm-surface: #111413;
+  --surface-dim: #1e2420;
+  --outline-soft: #859087;
+  --outline-variant: #2a342c;
+  --table-header: #0e3d26;
+  --table-header-text: #e6f7ef;
+
+  /* Tertiary Accent — Shuddh Ghee Gold */
+  --gold: #f59e0b;
+  --gold-container: #3a2504;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-sm leading-relaxed antialiased;
+    font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  /* Consistent Sans-Serif Typography Hierarchy across the app */
+  h1 {
+    font-size: 1.75rem; /* 28px */
+    line-height: 2.25rem; /* 36px */
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: 1.375rem; /* 22px */
+    line-height: 1.875rem; /* 30px */
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+
+  h3 {
+    font-size: 1.125rem; /* 18px */
+    line-height: 1.625rem; /* 26px */
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  h4 {
+    font-size: 1rem; /* 16px */
+    line-height: 1.5rem; /* 24px */
+    font-weight: 600;
+  }
+
+  h5 {
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.25rem; /* 20px */
+    font-weight: 600;
+  }
+
+  h6 {
+    font-size: 0.75rem; /* 12px */
+    line-height: 1rem; /* 16px */
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  p {
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.5rem; /* 24px */
+    font-weight: 400;
+  }
+
+  /* Scrollbar Styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--outline-variant);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--outline-soft);
+  }
+}
+
+/* Utility classes for the design system */
+@layer utilities {
+  .text-label {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .text-display {
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 56px;
+    letter-spacing: -0.02em;
+  }
+
+  .text-headline {
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 40px;
+    letter-spacing: -0.01em;
+  }
+
+  .text-title {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 28px;
+  }
+
+  .shadow-card {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  }
+  .dark .shadow-card {
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.45);
+  }
+
+  .shadow-elevated {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  }
+  .dark .shadow-elevated {
+    box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.65);
+  }
+}
