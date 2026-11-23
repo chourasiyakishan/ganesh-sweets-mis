@@ -117,59 +117,52 @@ export default function DashboardPage() {
   const [purchasesList, setPurchasesList] = useState<PurchaseEntry[]>(initialPurchases)
   const [expensesList, setExpensesList] = useState<ExpenseEntry[]>(initialExpenses)
 
-  // Load purchases and expenses from localStorage on mount
-  useEffect(() => {
+  // Load purchases and expenses from localStorage
+  const loadDashboardData = () => {
     try {
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") !== "false"
+
       const storedPurchases = localStorage.getItem(STORAGE_KEY)
-      if (storedPurchases) {
+      if (storedPurchases !== null) {
         const parsed = JSON.parse(storedPurchases)
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setPurchasesList(parsed)
         }
+      } else if (!isDemo) {
+        setPurchasesList([])
       }
 
       const storedExpenses = localStorage.getItem(EXPENSES_STORAGE_KEY)
-      if (storedExpenses) {
+      if (storedExpenses !== null) {
         const parsed = JSON.parse(storedExpenses)
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setExpensesList(parsed)
         }
+      } else if (!isDemo) {
+        setExpensesList([])
       }
     } catch (e) {
       console.error("Failed to load data from localStorage on Dashboard:", e)
     }
+  }
+
+  useEffect(() => {
+    loadDashboardData()
   }, [])
 
   // Sync listener across tabs / routes
   useEffect(() => {
-    const handleSync = () => {
-      try {
-        const storedPurchases = localStorage.getItem(STORAGE_KEY)
-        if (storedPurchases) {
-          const parsed = JSON.parse(storedPurchases)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setPurchasesList(parsed)
-          }
-        }
-
-        const storedExpenses = localStorage.getItem(EXPENSES_STORAGE_KEY)
-        if (storedExpenses) {
-          const parsed = JSON.parse(storedExpenses)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setExpensesList(parsed)
-          }
-        }
-      } catch (e) {
-        console.error("Dashboard sync error:", e)
-      }
-    }
-    window.addEventListener("purchases-updated", handleSync)
-    window.addEventListener("expenses-updated", handleSync)
-    window.addEventListener("storage", handleSync)
+    window.addEventListener("purchases-updated", loadDashboardData)
+    window.addEventListener("expenses-updated", loadDashboardData)
+    window.addEventListener("data-cleared", loadDashboardData)
+    window.addEventListener("data-restored", loadDashboardData)
+    window.addEventListener("storage", loadDashboardData)
     return () => {
-      window.removeEventListener("purchases-updated", handleSync)
-      window.removeEventListener("expenses-updated", handleSync)
-      window.removeEventListener("storage", handleSync)
+      window.removeEventListener("purchases-updated", loadDashboardData)
+      window.removeEventListener("expenses-updated", loadDashboardData)
+      window.removeEventListener("data-cleared", loadDashboardData)
+      window.removeEventListener("data-restored", loadDashboardData)
+      window.removeEventListener("storage", loadDashboardData)
     }
   }, [])
 

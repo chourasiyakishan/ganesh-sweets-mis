@@ -21,6 +21,9 @@ import {
   ArrowRight,
   X,
   Layers,
+  LogOut,
+  Sparkles,
+  UserCheck,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -42,6 +45,8 @@ import {
 } from "@/components/ui/command"
 import { useRouter } from "next/navigation"
 import { formatINR } from "@/lib/utils"
+import { useAuth } from "@/contexts/auth-context"
+import { isDemoMode } from "@/lib/data-management"
 import {
   initialItems,
   initialCategories,
@@ -64,7 +69,33 @@ export function Topbar() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [theme, setTheme] = useState<"light" | "dark" | "system">("light")
+  const [demoActive, setDemoActive] = useState(false)
   const router = useRouter()
+  const { user, users, switchUser, logout } = useAuth()
+
+  // Listen to Demo Mode status
+  useEffect(() => {
+    setDemoActive(isDemoMode())
+    const handleDemo = () => setDemoActive(isDemoMode())
+    window.addEventListener("demo-mode-changed", handleDemo)
+    window.addEventListener("data-cleared", handleDemo)
+    window.addEventListener("data-restored", handleDemo)
+    return () => {
+      window.removeEventListener("demo-mode-changed", handleDemo)
+      window.removeEventListener("data-cleared", handleDemo)
+      window.removeEventListener("data-restored", handleDemo)
+    }
+  }, [])
+
+  // User initials
+  const userInitials = useMemo(() => {
+    if (!user?.name) return "GS"
+    const parts = user.name.split(" ").filter(Boolean)
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase()
+    }
+    return user.name.slice(0, 2).toUpperCase()
+  }, [user?.name])
 
   // Real-time Master & Ledger Records
   const [itemsList] = useState<Item[]>(initialItems)
@@ -373,6 +404,27 @@ export function Topbar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Demo Mode Indicator (Clickable to jump to settings) */}
+          {demoActive ? (
+            <Badge
+              variant="outline"
+              onClick={() => router.push("/settings")}
+              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
+              title="Click to manage demo data or switch to Live Real Business Data"
+            >
+              <Sparkles className="h-3 w-3" /> Demo Mode
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              onClick={() => router.push("/settings")}
+              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-deep-green/10 text-deep-green border-deep-green/30 hover:bg-deep-green/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
+              title="Live Real Business Database Active"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-deep-green animate-pulse" /> Live Mode
+            </Badge>
+          )}
+
           {/* Notifications */}
           <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-foreground relative">
             <Bell className="h-4 w-4" />
@@ -381,29 +433,65 @@ export function Topbar() {
 
           <div className="h-6 w-[1px] bg-border hidden sm:block" />
 
-          {/* Admin User Menu */}
+          {/* Active User Menu & Role Switcher */}
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-2.5 cursor-pointer hover:bg-accent p-1.5 rounded-lg transition-all border-none bg-transparent">
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold text-xs shadow-xs">
-                AU
+                {userInitials}
               </div>
               <div className="hidden sm:block text-left">
-                <p className="text-xs font-semibold text-foreground leading-tight">Admin User</p>
-                <p className="text-[10px] text-muted-foreground">Super Admin</p>
+                <p className="text-xs font-semibold text-foreground leading-tight truncate max-w-[120px]">
+                  {user?.name || "Kishan (Owner)"}
+                </p>
+                <p className="text-[10px] text-muted-foreground font-medium">
+                  {user?.role || "Owner"}
+                </p>
               </div>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-xs font-bold leading-none text-foreground">{user?.name}</p>
+                  <p className="text-[11px] leading-none text-muted-foreground">{user?.email}</p>
+                  <div className="pt-1.5">
+                    <Badge variant="secondary" className="text-[10px] font-semibold">
+                      Role: {user?.role}
+                    </Badge>
+                  </div>
+                </div>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push("/settings")} className="cursor-pointer">
-                Business Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push("/settings")} className="cursor-pointer">
-                User & Roles Management
-              </DropdownMenuItem>
+
+              {/* Quick Switch Role */}
+              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Switch Active Role
+              </div>
+              {users.map((u) => (
+                <DropdownMenuItem
+                  key={u.id}
+                  onClick={() => switchUser(u.id)}
+                  className={`cursor-pointer text-xs flex items-center justify-between ${
+                    user?.id === u.id ? "bg-accent font-bold text-primary" : ""
+                  }`}
+                >
+                  <span className="truncate">{u.name}</span>
+                  <Badge variant="outline" className="text-[9px] ml-2">
+                    {u.role}
+                  </Badge>
+                </DropdownMenuItem>
+              ))}
+
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive font-medium cursor-pointer">
-                Log out
+              {(!user || user.role === "Owner") && (
+                <DropdownMenuItem onClick={() => router.push("/settings")} className="cursor-pointer text-xs">
+                  <SettingsIcon className="h-3.5 w-3.5 mr-2" /> Settings & Data Management
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onClick={logout}
+                className="text-destructive font-medium cursor-pointer text-xs"
+              >
+                <LogOut className="h-3.5 w-3.5 mr-2" /> Log out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

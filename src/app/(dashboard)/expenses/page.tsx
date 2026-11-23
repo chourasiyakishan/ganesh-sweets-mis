@@ -87,21 +87,31 @@ function getFinancialYear(dateStr: string): string {
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<ExpenseEntry[]>(initialExpenses)
 
-  // Load from localStorage on mount
-  useEffect(() => {
+  const loadExpensesFromStorage = () => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) {
+      if (stored !== null) {
         const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setExpenses(parsed)
           return
         }
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialExpenses))
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") !== "false"
+      if (isDemo) {
+        setExpenses(initialExpenses)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(initialExpenses))
+      } else {
+        setExpenses([])
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
+      }
     } catch (e) {
       console.error("Failed to read expenses from localStorage:", e)
     }
+  }
+
+  useEffect(() => {
+    loadExpensesFromStorage()
   }, [])
 
   // Sync helper that updates state, localStorage, and broadcasts
@@ -117,24 +127,15 @@ export default function ExpensesPage() {
 
   // Cross-tab and cross-component sync listener
   useEffect(() => {
-    const handleStorageSync = () => {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY)
-        if (stored) {
-          const parsed = JSON.parse(stored)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setExpenses(parsed)
-          }
-        }
-      } catch (e) {
-        console.error("Storage sync error:", e)
-      }
-    }
-    window.addEventListener("expenses-updated", handleStorageSync)
-    window.addEventListener("storage", handleStorageSync)
+    window.addEventListener("expenses-updated", loadExpensesFromStorage)
+    window.addEventListener("data-cleared", loadExpensesFromStorage)
+    window.addEventListener("data-restored", loadExpensesFromStorage)
+    window.addEventListener("storage", loadExpensesFromStorage)
     return () => {
-      window.removeEventListener("expenses-updated", handleStorageSync)
-      window.removeEventListener("storage", handleStorageSync)
+      window.removeEventListener("expenses-updated", loadExpensesFromStorage)
+      window.removeEventListener("data-cleared", loadExpensesFromStorage)
+      window.removeEventListener("data-restored", loadExpensesFromStorage)
+      window.removeEventListener("storage", loadExpensesFromStorage)
     }
   }, [])
 
