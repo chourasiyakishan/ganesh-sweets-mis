@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import {
-  ShieldCheck,
   Lock,
   Mail,
   ArrowRight,
@@ -14,8 +13,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuth } from "@/contexts/auth-context"
 import { toast } from "sonner"
 
@@ -71,16 +69,8 @@ export default function LoginPage() {
 
         {/* Login Form Card */}
         <Card className="border border-border shadow-card bg-card/95 backdrop-blur-xs">
-          <CardHeader className="space-y-1.5 pb-4 border-b border-border bg-muted/20">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-bold text-foreground">Sign In</CardTitle>
-              <Badge variant="secondary" className="text-[11px] font-semibold text-deep-green border-deep-green/30">
-                <ShieldCheck className="h-3 w-3 mr-1 text-deep-green" /> Cloud Secured
-              </Badge>
-            </div>
-            <CardDescription className="text-xs text-muted-foreground">
-              Enter your registered email and password to access the sweet shop ledger.
-            </CardDescription>
+          <CardHeader className="pb-3 border-b border-border bg-muted/20">
+            <CardTitle className="text-base font-bold text-foreground">Sign In</CardTitle>
           </CardHeader>
 
           <CardContent className="pt-5 pb-3">
@@ -91,7 +81,6 @@ export default function LoginPage() {
                   <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
                     type="email"
-                    placeholder="e.g. admin@ganeshsweets.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-9 text-xs h-9"
@@ -109,7 +98,6 @@ export default function LoginPage() {
                   <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
                     type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-9 pr-9 text-xs h-9"
@@ -137,7 +125,6 @@ export default function LoginPage() {
           </CardContent>
 
           <CardFooter className="pt-3 pb-4 border-t border-border flex flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground text-center">
-            <span>Role-Based Access Control (Owner, Manager, Accountant, Cashier)</span>
             <span>© {new Date().getFullYear()} Ganesh Sweets & Namkeen Platform</span>
           </CardFooter>
         </Card>

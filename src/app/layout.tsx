@@ -18,6 +18,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Ganesh Sweets MIS",
   description: "Management Information System for Ganesh Sweets",
+  icons: {
+    icon: [
+      { url: "/icon.png" },
+      { url: "/logo.png" },
+    ],
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
