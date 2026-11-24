@@ -30,6 +30,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from "@/components/ui/badge"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { initialPurchases, initialItems, initialVendors, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
+import { fetchPurchases } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
@@ -87,8 +88,8 @@ export default function PurchasesPage() {
           return
         }
       }
-      // If demo mode is disabled in localStorage, default to empty list
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") !== "false"
+      // Demo mode is explicitly true only when enabled by user
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
       if (isDemo) {
         setPurchases(initialPurchases)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(initialPurchases))
@@ -103,6 +104,12 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     loadPurchasesFromStorage()
+    // Also try fetching from Supabase if configured
+    fetchPurchases().then((data) => {
+      if (data && data.length > 0) {
+        setPurchases(data)
+      }
+    })
   }, [])
 
   // Sync helper that updates state, localStorage, and broadcasts

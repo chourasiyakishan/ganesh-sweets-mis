@@ -27,16 +27,66 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatINR } from "@/lib/utils"
 import { initialItems, initialCategories, initialStandardUnits, initialVendors, Item } from "@/lib/mockData"
+import { ITEMS_STORAGE_KEY } from "@/lib/data-management"
+import { fetchItems, saveItemToDb } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "name" | "category" | "vendors" | "price" | "unit" | "notes"
 type SortOrder = "asc" | "desc"
 
 export default function ItemsPage() {
-  const [items, setItems] = useState<Item[]>(initialItems)
+  const [items, setItems] = useState<Item[]>([])
   const [categories, setCategories] = useState<string[]>(initialCategories)
   const [standardUnits, setStandardUnits] = useState<string[]>(initialStandardUnits)
-  const [vendors] = useState(initialVendors)
+  const [vendors, setVendors] = useState<any[]>([])
+
+  // Load items from localStorage & Supabase
+  const loadItems = () => {
+    try {
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
+      const stored = localStorage.getItem(ITEMS_STORAGE_KEY)
+      if (stored !== null) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed)) {
+          setItems(parsed)
+          return
+        }
+      }
+      if (isDemo) {
+        setItems(initialItems)
+        localStorage.setItem(ITEMS_STORAGE_KEY, JSON.stringify(initialItems))
+      } else {
+        setItems([])
+        fetchItems().then((dbItems) => {
+          if (dbItems && dbItems.length > 0) setItems(dbItems)
+        })
+      }
+    } catch (e) {
+      console.error("Failed to load items:", e)
+    }
+  }
+
+  useEffect(() => {
+    loadItems()
+    window.addEventListener("items-updated", loadItems)
+    window.addEventListener("data-cleared", loadItems)
+    window.addEventListener("data-restored", loadItems)
+    return () => {
+      window.removeEventListener("items-updated", loadItems)
+      window.removeEventListener("data-cleared", loadItems)
+      window.removeEventListener("data-restored", loadItems)
+    }
+  }, [])
+
+  const updateItems = (newList: Item[]) => {
+    setItems(newList)
+    try {
+      localStorage.setItem(ITEMS_STORAGE_KEY, JSON.stringify(newList))
+      window.dispatchEvent(new Event("items-updated"))
+    } catch (e) {
+      console.error("Failed to save items:", e)
+    }
+  }
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState("")
@@ -325,7 +375,8 @@ export default function ItemsPage() {
       notes: itemNotes.trim() || undefined,
     }
 
-    setItems([...items, newItem])
+    updateItems([...items, newItem])
+    saveItemToDb(newItem)
     setIsAddOpen(false)
     toast.success(`Item "${trimmedName}" created successfully!`)
   }
@@ -359,7 +410,9 @@ export default function ItemsPage() {
         : i
     )
 
-    setItems(updated)
+    updateItems(updated)
+    const updatedItem = updated.find((i) => i.id === editingItem.id)
+    if (updatedItem) saveItemToDb(updatedItem)
     setIsEditOpen(false)
     setEditingItem(null)
     toast.success(`Item "${trimmedName}" updated!`)
@@ -367,7 +420,7 @@ export default function ItemsPage() {
 
   const handleDeleteItem = (id: string, name: string) => {
     if (confirm(`Are you sure you want to delete "${name}"?`)) {
-      setItems((prev) => prev.filter((i) => i.id !== id))
+      updateItems(items.filter((i) => i.id !== id))
       toast.success(`Item "${name}" deleted`)
     }
   }

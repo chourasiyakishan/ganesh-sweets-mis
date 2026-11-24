@@ -18,9 +18,9 @@ export const ORDERS_STORAGE_KEY = "ganesh_sweets_orders_v1"
 export const RECIPES_STORAGE_KEY = "ganesh_sweets_recipes_v1"
 
 export function isDemoMode(): boolean {
-  if (typeof window === "undefined") return true
+  if (typeof window === "undefined") return false
   const stored = localStorage.getItem(DEMO_MODE_KEY)
-  if (stored === null) return true // Default to true until user clicks 'Start Fresh'
+  if (stored === null) return false // Default is Live Mode (Demo Mode is OFF by default)
   return stored === "true"
 }
 

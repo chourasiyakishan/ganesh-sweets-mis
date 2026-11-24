@@ -39,6 +39,7 @@ import {
   ExpenseEntry,
   ExpenseCategory,
 } from "@/lib/mockData"
+import { fetchExpenses } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "expenseDate" | "category" | "title" | "amount" | "remarks"
@@ -97,7 +98,7 @@ export default function ExpensesPage() {
           return
         }
       }
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") !== "false"
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
       if (isDemo) {
         setExpenses(initialExpenses)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(initialExpenses))
@@ -112,6 +113,11 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     loadExpensesFromStorage()
+    fetchExpenses().then((data) => {
+      if (data && data.length > 0) {
+        setExpenses(data)
+      }
+    })
   }, [])
 
   // Sync helper that updates state, localStorage, and broadcasts

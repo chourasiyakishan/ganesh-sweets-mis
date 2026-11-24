@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import {
   Search,
   Bell,
@@ -70,8 +70,25 @@ export function Topbar() {
   const [query, setQuery] = useState("")
   const [theme, setTheme] = useState<"light" | "dark" | "system">("light")
   const [demoActive, setDemoActive] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const { user, users, switchUser, logout } = useAuth()
+
+  // Handle click outside to close user menu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false)
+      }
+    }
+    if (userMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [userMenuOpen])
 
   // Listen to Demo Mode status
   useEffect(() => {
@@ -404,13 +421,13 @@ export function Topbar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Demo Mode Indicator (Clickable to jump to settings) */}
+          {/* Demo Mode / Live Mode Indicator */}
           {demoActive ? (
             <Badge
               variant="outline"
               onClick={() => router.push("/settings")}
               className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
-              title="Click to manage demo data or switch to Live Real Business Data"
+              title="Click to turn Demo Mode OFF and use Live Real Data"
             >
               <Sparkles className="h-3 w-3" /> Demo Mode
             </Badge>
@@ -418,10 +435,10 @@ export function Topbar() {
             <Badge
               variant="outline"
               onClick={() => router.push("/settings")}
-              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-deep-green/10 text-deep-green border-deep-green/30 hover:bg-deep-green/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
-              title="Live Real Business Database Active"
+              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
+              title="Live Business Database Active"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-deep-green animate-pulse" /> Live Mode
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Mode
             </Badge>
           )}
 
@@ -433,9 +450,13 @@ export function Topbar() {
 
           <div className="h-6 w-[1px] bg-border hidden sm:block" />
 
-          {/* Active User Menu & Role Switcher */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2.5 cursor-pointer hover:bg-accent p-1.5 rounded-lg transition-all border-none bg-transparent">
+          {/* Active User Menu & Role Switcher (Fail-safe Custom Dropdown) */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((prev) => !prev)}
+              className="flex items-center gap-2.5 cursor-pointer hover:bg-accent p-1.5 rounded-lg transition-all border-none bg-transparent outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            >
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold text-xs shadow-xs">
                 {userInitials}
               </div>
@@ -447,54 +468,78 @@ export function Topbar() {
                   {user?.role || "Owner"}
                 </p>
               </div>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
-                  <p className="text-xs font-bold leading-none text-foreground">{user?.name}</p>
-                  <p className="text-[11px] leading-none text-muted-foreground">{user?.email}</p>
-                  <div className="pt-1.5">
-                    <Badge variant="secondary" className="text-[10px] font-semibold">
-                      Role: {user?.role}
+            </button>
+
+            {userMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-card rounded-xl border border-border shadow-elevated z-50 p-2 animate-in fade-in-0 zoom-in-95 duration-150">
+                <div className="p-2 border-b border-border mb-1">
+                  <p className="text-xs font-bold text-foreground leading-none">{user?.name || "Kishan (Owner)"}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1 truncate">{user?.email || "admin@ganeshsweets.com"}</p>
+                  <div className="pt-2">
+                    <Badge variant="secondary" className="text-[10px] font-semibold text-primary">
+                      Role: {user?.role || "Owner"}
                     </Badge>
                   </div>
                 </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
 
-              {/* Quick Switch Role */}
-              <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Switch Active Role
+                {users.length > 1 && (
+                  <div className="py-1 border-b border-border mb-1">
+                    <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Switch Active Role
+                    </p>
+                    {users.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          switchUser(u.id)
+                          setUserMenuOpen(false)
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors text-left ${
+                          user?.id === u.id
+                            ? "bg-primary/10 text-primary font-bold"
+                            : "text-foreground hover:bg-accent"
+                        }`}
+                      >
+                        <span className="truncate">{u.name}</span>
+                        <Badge variant="outline" className="text-[9px] ml-1.5 shrink-0">
+                          {u.role}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="py-1 space-y-0.5">
+                  {(!user || user.role === "Owner") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUserMenuOpen(false)
+                        router.push("/settings")
+                      }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-foreground hover:bg-accent cursor-pointer transition-colors text-left"
+                    >
+                      <SettingsIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                      Settings & Data Management
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      logout()
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-destructive hover:bg-destructive/10 font-medium cursor-pointer transition-colors text-left"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Sign Out
+                  </button>
+                </div>
               </div>
-              {users.map((u) => (
-                <DropdownMenuItem
-                  key={u.id}
-                  onClick={() => switchUser(u.id)}
-                  className={`cursor-pointer text-xs flex items-center justify-between ${
-                    user?.id === u.id ? "bg-accent font-bold text-primary" : ""
-                  }`}
-                >
-                  <span className="truncate">{u.name}</span>
-                  <Badge variant="outline" className="text-[9px] ml-2">
-                    {u.role}
-                  </Badge>
-                </DropdownMenuItem>
-              ))}
-
-              <DropdownMenuSeparator />
-              {(!user || user.role === "Owner") && (
-                <DropdownMenuItem onClick={() => router.push("/settings")} className="cursor-pointer text-xs">
-                  <SettingsIcon className="h-3.5 w-3.5 mr-2" /> Settings & Data Management
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={logout}
-                className="text-destructive font-medium cursor-pointer text-xs"
-              >
-                <LogOut className="h-3.5 w-3.5 mr-2" /> Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            )}
+          </div>
         </div>
       </header>
 

@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { initialCustomers, initialCustomerTypes, initialOrders, Customer, Order } from "@/lib/mockData"
+import { CUSTOMERS_STORAGE_KEY } from "@/lib/data-management"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -32,8 +33,52 @@ type SortField = "customerNumber" | "name" | "mobile" | "address"
 type SortOrder = "asc" | "desc"
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [customerTypes, setCustomerTypes] = useState<string[]>(initialCustomerTypes)
+
+  const loadCustomers = () => {
+    try {
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
+      const stored = localStorage.getItem(CUSTOMERS_STORAGE_KEY)
+      if (stored !== null) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed)) {
+          setCustomers(parsed)
+          return
+        }
+      }
+      if (isDemo) {
+        setCustomers(initialCustomers)
+        localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(initialCustomers))
+      } else {
+        setCustomers([])
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  useEffect(() => {
+    loadCustomers()
+    window.addEventListener("customers-updated", loadCustomers)
+    window.addEventListener("data-cleared", loadCustomers)
+    window.addEventListener("data-restored", loadCustomers)
+    return () => {
+      window.removeEventListener("customers-updated", loadCustomers)
+      window.removeEventListener("data-cleared", loadCustomers)
+      window.removeEventListener("data-restored", loadCustomers)
+    }
+  }, [])
+
+  const updateCustomers = (newList: Customer[]) => {
+    setCustomers(newList)
+    try {
+      localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(newList))
+      window.dispatchEvent(new Event("customers-updated"))
+    } catch (e) {
+      console.error(e)
+    }
+  }
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState("")

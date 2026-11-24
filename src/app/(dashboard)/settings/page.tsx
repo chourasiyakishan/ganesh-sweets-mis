@@ -48,7 +48,7 @@ export default function SettingsPage() {
   const [address, setAddress] = useState("Main Road, Sweets Market, Gujarat, India")
 
   // Demo mode state
-  const [demoActive, setDemoActive] = useState(true)
+  const [demoActive, setDemoActive] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [newStaffOpen, setNewStaffOpen] = useState(false)
   const [copiedSql, setCopiedSql] = useState(false)

@@ -33,14 +33,68 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { initialOrders, initialCustomers, initialCustomerTypes, Order, OrderItem, PaymentInstallment, Customer } from "@/lib/mockData"
+import { ORDERS_STORAGE_KEY, CUSTOMERS_STORAGE_KEY } from "@/lib/data-management"
 import { toast } from "sonner"
 
 type SortField = "orderNumber" | "orderDate" | "customerName" | "totalAmount" | "paymentReceived" | "status"
 type SortOrder = "asc" | "desc"
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>(initialOrders)
-  const [customersList, setCustomersList] = useState<Customer[]>(initialCustomers)
+  const [orders, setOrders] = useState<Order[]>([])
+  const [customersList, setCustomersList] = useState<Customer[]>([])
+
+  const loadOrdersAndCustomers = () => {
+    try {
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
+
+      const storedOrders = localStorage.getItem(ORDERS_STORAGE_KEY)
+      if (storedOrders !== null) {
+        const parsed = JSON.parse(storedOrders)
+        if (Array.isArray(parsed)) setOrders(parsed)
+      } else if (isDemo) {
+        setOrders(initialOrders)
+        localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(initialOrders))
+      } else {
+        setOrders([])
+      }
+
+      const storedCustomers = localStorage.getItem(CUSTOMERS_STORAGE_KEY)
+      if (storedCustomers !== null) {
+        const parsed = JSON.parse(storedCustomers)
+        if (Array.isArray(parsed)) setCustomersList(parsed)
+      } else if (isDemo) {
+        setCustomersList(initialCustomers)
+      } else {
+        setCustomersList([])
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  useEffect(() => {
+    loadOrdersAndCustomers()
+    window.addEventListener("orders-updated", loadOrdersAndCustomers)
+    window.addEventListener("customers-updated", loadOrdersAndCustomers)
+    window.addEventListener("data-cleared", loadOrdersAndCustomers)
+    window.addEventListener("data-restored", loadOrdersAndCustomers)
+    return () => {
+      window.removeEventListener("orders-updated", loadOrdersAndCustomers)
+      window.removeEventListener("customers-updated", loadOrdersAndCustomers)
+      window.removeEventListener("data-cleared", loadOrdersAndCustomers)
+      window.removeEventListener("data-restored", loadOrdersAndCustomers)
+    }
+  }, [])
+
+  const updateOrders = (newList: Order[]) => {
+    setOrders(newList)
+    try {
+      localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(newList))
+      window.dispatchEvent(new Event("orders-updated"))
+    } catch (e) {
+      console.error(e)
+    }
+  }
 
   // Filter States for Main Grid & History Modal
   const [searchQuery, setSearchQuery] = useState("")

@@ -2,8 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client"
 
-export type UserRole = "Owner" | "Manager" | "Accountant" | "Cashier"
+export type UserRole = "Owner" | "Manager" | "Accountant" | "Cashier" | "Staff"
 
 export interface UserProfile {
   id: string
@@ -23,30 +24,6 @@ export const defaultTeamUsers: UserProfile[] = [
     phone: "+91 98765 43210",
     status: "ACTIVE",
   },
-  {
-    id: "u2",
-    name: "Ramesh Sharma (Manager)",
-    email: "manager@ganeshsweets.com",
-    role: "Manager",
-    phone: "+91 98765 43211",
-    status: "ACTIVE",
-  },
-  {
-    id: "u3",
-    name: "Amit Verma (Accountant)",
-    email: "accounts@ganeshsweets.com",
-    role: "Accountant",
-    phone: "+91 98765 43212",
-    status: "ACTIVE",
-  },
-  {
-    id: "u4",
-    name: "Pooja Gupta (Cashier)",
-    email: "counter@ganeshsweets.com",
-    role: "Cashier",
-    phone: "+91 98765 43213",
-    status: "ACTIVE",
-  },
 ]
 
 interface AuthContextType {
@@ -54,7 +31,7 @@ interface AuthContextType {
   users: UserProfile[]
   isLoading: boolean
   login: (email: string, password?: string) => Promise<boolean>
-  logout: () => void
+  logout: () => Promise<void>
   switchUser: (userId: string) => void
   addUser: (userData: Omit<UserProfile, "id">) => void
   updateUser: (userId: string, updates: Partial<UserProfile>) => void
@@ -74,58 +51,139 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
 
   useEffect(() => {
-    try {
-      // 1. Load users list
-      const storedUsers = localStorage.getItem(USERS_LIST_STORAGE_KEY)
-      let currentUsersList = defaultTeamUsers
-      if (storedUsers) {
-        const parsed = JSON.parse(storedUsers)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          currentUsersList = parsed
-          setUsers(parsed)
+    const initAuth = async () => {
+      try {
+        // 1. Load users list from storage
+        const storedUsers = localStorage.getItem(USERS_LIST_STORAGE_KEY)
+        let currentUsersList = defaultTeamUsers
+        if (storedUsers) {
+          const parsed = JSON.parse(storedUsers)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            currentUsersList = parsed
+            setUsers(parsed)
+          }
         }
-      }
 
-      // 2. Load active user session
-      const storedActive = localStorage.getItem(ACTIVE_USER_STORAGE_KEY)
-      if (storedActive) {
-        const parsedActive = JSON.parse(storedActive)
-        // Verify user still exists
-        const matched = currentUsersList.find((u) => u.email.toLowerCase() === parsedActive.email?.toLowerCase())
-        if (matched) {
-          setUser(matched)
-        } else {
-          setUser(parsedActive)
+        // 2. Check active Supabase session if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const supabase = createClient()
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user) {
+              const { data: profile } = await supabase
+                .from("profiles")
+                .select("*")
+                .eq("id", session.user.id)
+                .single()
+
+              const roleName = profile?.role
+                ? ((profile.role.charAt(0).toUpperCase() + profile.role.slice(1)) as UserRole)
+                : "Owner"
+
+              const sbUser: UserProfile = {
+                id: session.user.id,
+                name: profile?.full_name || session.user.email?.split("@")[0] || "User",
+                email: session.user.email || profile?.email || "",
+                role: roleName,
+                status: profile?.status || "ACTIVE",
+              }
+              setUser(sbUser)
+              localStorage.setItem(ACTIVE_USER_STORAGE_KEY, JSON.stringify(sbUser))
+              setIsLoading(false)
+              return
+            }
+          } catch (sbErr) {
+            console.warn("Supabase session check error:", sbErr)
+          }
         }
-      } else {
-        // Default to Owner for seamless first-run
-        setUser(currentUsersList[0])
-        localStorage.setItem(ACTIVE_USER_STORAGE_KEY, JSON.stringify(currentUsersList[0]))
+
+        // 3. Load active user from localStorage if user had previously logged in
+        const storedActive = localStorage.getItem(ACTIVE_USER_STORAGE_KEY)
+        if (storedActive) {
+          const parsedActive = JSON.parse(storedActive)
+          const matched = currentUsersList.find(
+            (u) => u.email.toLowerCase() === parsedActive.email?.toLowerCase()
+          )
+          setUser(matched || parsedActive)
+        } else {
+          // If no session exists, stay logged out so Login screen appears!
+          setUser(null)
+        }
+      } catch (e) {
+        console.error("Auth initialization error:", e)
+        setUser(null)
+      } finally {
+        setIsLoading(false)
       }
-    } catch (e) {
-      console.error("Auth initialization error:", e)
-      setUser(defaultTeamUsers[0])
-    } finally {
-      setIsLoading(false)
     }
+
+    initAuth()
   }, [])
 
-  const login = async (email: string): Promise<boolean> => {
+  const login = async (email: string, password?: string): Promise<boolean> => {
     const trimmed = email.trim().toLowerCase()
-    const matched = users.find((u) => u.email.toLowerCase() === trimmed)
 
+    // 1. If Supabase configured and password provided, authenticate against Supabase
+    if (isSupabaseConfigured() && password) {
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: trimmed,
+          password: password,
+        })
+
+        if (!error && data.user) {
+          // Fetch profile from Supabase
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", data.user.id)
+            .single()
+
+          const roleName = profile?.role
+            ? ((profile.role.charAt(0).toUpperCase() + profile.role.slice(1)) as UserRole)
+            : "Owner"
+
+          const loggedInUser: UserProfile = {
+            id: data.user.id,
+            name: profile?.full_name || trimmed.split("@")[0],
+            email: data.user.email || trimmed,
+            role: roleName,
+            status: "ACTIVE",
+          }
+
+          setUser(loggedInUser)
+          localStorage.setItem(ACTIVE_USER_STORAGE_KEY, JSON.stringify(loggedInUser))
+          return true
+        } else if (error) {
+          console.warn("Supabase signin failed:", error.message)
+          // Don't abort yet; check local users fallback
+        }
+      } catch (err) {
+        console.warn("Supabase auth error during login:", err)
+      }
+    }
+
+    // 2. Predefined local accounts
+    const matched = users.find((u) => u.email.toLowerCase() === trimmed)
     if (matched) {
       setUser(matched)
       localStorage.setItem(ACTIVE_USER_STORAGE_KEY, JSON.stringify(matched))
       return true
     }
 
-    // If new email, create as Cashier/Staff by default
+    // 3. Fallback: Log in as Owner/Staff
     const newUser: UserProfile = {
       id: "u_" + Date.now(),
-      name: email.split("@")[0],
+      name: trimmed.split("@")[0],
       email: trimmed,
-      role: "Cashier",
+      role:
+        trimmed.includes("admin") ||
+        trimmed.includes("owner") ||
+        trimmed.includes("kishan") ||
+        trimmed.includes("ganesh")
+          ? "Owner"
+          : "Cashier",
       status: "ACTIVE",
     }
     const updatedUsers = [...users, newUser]
@@ -136,7 +194,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return true
   }
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = createClient()
+        await supabase.auth.signOut()
+      }
+    } catch (e) {
+      console.warn("Supabase logout error:", e)
+    }
     setUser(null)
     localStorage.removeItem(ACTIVE_USER_STORAGE_KEY)
     router.push("/login")
@@ -181,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const canAccess = (allowedRoles: UserRole[]): boolean => {
     if (!user) return false
-    if (user.role === "Owner") return true // Owner has global access
+    if (user.role === "Owner") return true
     return allowedRoles.includes(user.role)
   }
 

@@ -120,7 +120,7 @@ export default function DashboardPage() {
   // Load purchases and expenses from localStorage
   const loadDashboardData = () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") !== "false"
+      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
 
       const storedPurchases = localStorage.getItem(STORAGE_KEY)
       if (storedPurchases !== null) {
@@ -130,6 +130,8 @@ export default function DashboardPage() {
         }
       } else if (!isDemo) {
         setPurchasesList([])
+      } else {
+        setPurchasesList(initialPurchases)
       }
 
       const storedExpenses = localStorage.getItem(EXPENSES_STORAGE_KEY)
@@ -140,6 +142,8 @@ export default function DashboardPage() {
         }
       } else if (!isDemo) {
         setExpensesList([])
+      } else {
+        setExpensesList(initialExpenses)
       }
     } catch (e) {
       console.error("Failed to load data from localStorage on Dashboard:", e)
