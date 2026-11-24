@@ -26,6 +26,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { initialCustomers, initialCustomerTypes, initialOrders, Customer, Order } from "@/lib/mockData"
 import { CUSTOMERS_STORAGE_KEY } from "@/lib/data-management"
+import { fetchCustomers } from "@/lib/supabase/data-service"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -38,7 +39,6 @@ export default function CustomersPage() {
 
   const loadCustomers = () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
       const stored = localStorage.getItem(CUSTOMERS_STORAGE_KEY)
       if (stored !== null) {
         const parsed = JSON.parse(stored)
@@ -47,12 +47,10 @@ export default function CustomersPage() {
           return
         }
       }
-      if (isDemo) {
-        setCustomers(initialCustomers)
-        localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(initialCustomers))
-      } else {
-        setCustomers([])
-      }
+      setCustomers([])
+      fetchCustomers().then((dbCustomers: Customer[]) => {
+        if (dbCustomers && dbCustomers.length > 0) setCustomers(dbCustomers)
+      })
     } catch (e) {
       console.error(e)
     }

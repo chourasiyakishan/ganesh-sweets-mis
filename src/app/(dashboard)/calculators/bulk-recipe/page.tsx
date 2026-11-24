@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,30 +10,37 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { formatINR } from "@/lib/utils"
-import { initialRecipes, Recipe } from "@/lib/mockData"
+import { Recipe } from "@/lib/mockData"
+import { fetchRecipes } from "@/lib/supabase/data-service"
 import { ChefHat, RotateCcw, Scale, Sparkles, ArrowRightLeft, CheckCircle2 } from "lucide-react"
 
 export default function BulkRecipeCalculatorPage() {
-  const [recipes] = useState<Recipe[]>(initialRecipes)
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+
+  useEffect(() => {
+    fetchRecipes().then((loaded) => {
+      setRecipes(loaded)
+      if (loaded.length > 0) {
+        setSelectedRecipeName(loaded[0].name)
+        setTargetYieldInput(loaded[0].outputYield.toString())
+      }
+    })
+  }, [])
 
   // Sort recipes alphabetically (A-Z)
   const sortedRecipes = useMemo(() => {
     return [...recipes].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
   }, [recipes])
 
-  const [selectedRecipeName, setSelectedRecipeName] = useState<string>(
-    sortedRecipes.length > 0 ? sortedRecipes[0].name : ""
-  )
+  const [selectedRecipeName, setSelectedRecipeName] = useState<string>("")
   const [scaleFactor, setScaleFactor] = useState<number>(1.0)
-  const [targetYieldInput, setTargetYieldInput] = useState<string>(
-    sortedRecipes.length > 0 ? sortedRecipes[0].outputYield.toString() : "10"
-  )
+  const [targetYieldInput, setTargetYieldInput] = useState<string>("10")
   const [limitingItemName, setLimitingItemName] = useState<string | null>(null)
 
   // Current active recipe
   const currentRecipe = useMemo(() => {
     if (!selectedRecipeName && sortedRecipes.length > 0) return sortedRecipes[0]
-    return sortedRecipes.find((r) => r.name === selectedRecipeName) || sortedRecipes[0]
+    return sortedRecipes.find((r) => r.name === selectedRecipeName) || sortedRecipes[0] || null
   }, [sortedRecipes, selectedRecipeName])
 
   // Handler 1: Scale by Target Yield
@@ -74,6 +82,39 @@ export default function BulkRecipeCalculatorPage() {
 
   // Scaled calculations
   const scaledYield = currentRecipe.outputYield * scaleFactor
+  if (sortedRecipes.length === 0 || !currentRecipe) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-card p-5 sm:p-6 rounded-xl border border-border shadow-xs">
+          <h1 className="text-headline text-foreground font-bold tracking-tight flex items-center gap-2.5">
+            <ChefHat className="h-7 w-7 text-saffron" />
+            Bulk Recipe Scaling Calculator
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Two-way proportional scaling: Scale by target output yield OR adjust any single ingredient to reverse-calculate batch capacity
+          </p>
+        </div>
+
+        <Card className="border border-border shadow-card p-12 text-center space-y-4">
+          <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
+            <Scale className="h-7 w-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-foreground">No Recipes Available for Scaling</h3>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              You haven&apos;t added any sweet recipes yet. Create your recipes in Recipe Master to use this bulk scaling calculator.
+            </p>
+          </div>
+          <Link href="/recipes">
+            <Button className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold">
+              <ChefHat className="h-4 w-4 mr-1.5" /> Go to Recipe Master
+            </Button>
+          </Link>
+        </Card>
+      </div>
+    )
+  }
+
   const scaledIngredients = currentRecipe.ingredients.map((ing) => {
     const scaledQty = ing.quantity * scaleFactor
     const scaledCost = scaledQty * ing.currentRate

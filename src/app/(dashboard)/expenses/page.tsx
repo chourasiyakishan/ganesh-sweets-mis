@@ -98,14 +98,8 @@ export default function ExpensesPage() {
           return
         }
       }
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
-      if (isDemo) {
-        setExpenses(initialExpenses)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(initialExpenses))
-      } else {
-        setExpenses([])
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
-      }
+      setExpenses([])
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
     } catch (e) {
       console.error("Failed to read expenses from localStorage:", e)
     }

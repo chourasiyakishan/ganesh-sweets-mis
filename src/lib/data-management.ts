@@ -1,13 +1,3 @@
-import {
-  initialItems,
-  initialVendors,
-  initialCustomers,
-  initialPurchases,
-  initialExpenses,
-  initialOrders,
-  initialRecipes,
-} from "./mockData"
-
 export const DEMO_MODE_KEY = "ganesh_sweets_demo_mode"
 export const PURCHASES_STORAGE_KEY = "ganesh_sweets_purchases"
 export const EXPENSES_STORAGE_KEY = "ganesh_sweets_expenses_v1"
@@ -17,23 +7,20 @@ export const CUSTOMERS_STORAGE_KEY = "ganesh_sweets_customers_v1"
 export const ORDERS_STORAGE_KEY = "ganesh_sweets_orders_v1"
 export const RECIPES_STORAGE_KEY = "ganesh_sweets_recipes_v1"
 
+// Demo mode permanently disabled — app operates strictly with live/fresh business data
 export function isDemoMode(): boolean {
-  if (typeof window === "undefined") return false
-  const stored = localStorage.getItem(DEMO_MODE_KEY)
-  if (stored === null) return false // Default is Live Mode (Demo Mode is OFF by default)
-  return stored === "true"
+  return false
 }
 
 export function setDemoMode(enabled: boolean) {
   if (typeof window === "undefined") return
-  localStorage.setItem(DEMO_MODE_KEY, enabled ? "true" : "false")
+  localStorage.setItem(DEMO_MODE_KEY, "false")
   window.dispatchEvent(new Event("demo-mode-changed"))
 }
 
 export function clearAllDemoData() {
   if (typeof window === "undefined") return
 
-  // Set Demo mode to OFF (Live Real Business Data Mode)
   localStorage.setItem(DEMO_MODE_KEY, "false")
 
   // Set all business ledgers to empty arrays
@@ -57,32 +44,24 @@ export function clearAllDemoData() {
 }
 
 export function restoreDemoData() {
-  if (typeof window === "undefined") return
-
-  localStorage.setItem(DEMO_MODE_KEY, "true")
-
-  localStorage.setItem(PURCHASES_STORAGE_KEY, JSON.stringify(initialPurchases))
-  localStorage.setItem(EXPENSES_STORAGE_KEY, JSON.stringify(initialExpenses))
-  localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(initialOrders))
-  localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(initialCustomers))
-  localStorage.setItem(ITEMS_STORAGE_KEY, JSON.stringify(initialItems))
-  localStorage.setItem(VENDORS_STORAGE_KEY, JSON.stringify(initialVendors))
-  localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(initialRecipes))
-
-  window.dispatchEvent(new Event("data-restored"))
-  window.dispatchEvent(new Event("purchases-updated"))
-  window.dispatchEvent(new Event("expenses-updated"))
-  window.dispatchEvent(new Event("items-updated"))
-  window.dispatchEvent(new Event("vendors-updated"))
-  window.dispatchEvent(new Event("customers-updated"))
-  window.dispatchEvent(new Event("orders-updated"))
-  window.dispatchEvent(new Event("recipes-updated"))
+  // Permanently disabled
 }
 
-export function loadData<T>(storageKey: string, initialFallback: T[]): T[] {
-  if (typeof window === "undefined") return initialFallback
+export function ensureCleanStore() {
+  if (typeof window === "undefined") return
   try {
-    const demo = isDemoMode()
+    const PURGE_FLAG = "ganesh_sweets_mock_purged_v3"
+    if (localStorage.getItem(PURGE_FLAG) !== "true") {
+      clearAllDemoData()
+      localStorage.setItem(PURGE_FLAG, "true")
+    }
+  } catch {}
+}
+
+export function loadData<T>(storageKey: string, initialFallback: T[] = []): T[] {
+  if (typeof window === "undefined") return []
+  try {
+    ensureCleanStore()
     const stored = localStorage.getItem(storageKey)
 
     if (stored !== null) {
@@ -92,16 +71,10 @@ export function loadData<T>(storageKey: string, initialFallback: T[]): T[] {
       }
     }
 
-    // If no stored value exists yet:
-    if (demo) {
-      localStorage.setItem(storageKey, JSON.stringify(initialFallback))
-      return initialFallback
-    } else {
-      localStorage.setItem(storageKey, JSON.stringify([]))
-      return []
-    }
+    localStorage.setItem(storageKey, JSON.stringify([]))
+    return []
   } catch (e) {
     console.error(`Error loading data for ${storageKey}:`, e)
-    return isDemoMode() ? initialFallback : []
+    return []
   }
 }

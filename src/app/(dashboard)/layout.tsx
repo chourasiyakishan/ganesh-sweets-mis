@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
 import { useAuth } from "@/contexts/auth-context"
+import { ensureCleanStore } from "@/lib/data-management"
 
 export default function DashboardLayout({
   children,
@@ -13,6 +14,10 @@ export default function DashboardLayout({
 }) {
   const { user, isLoading } = useAuth()
   const router = useRouter()
+
+  useEffect(() => {
+    ensureCleanStore()
+  }, [])
 
   useEffect(() => {
     if (!isLoading && !user) {

@@ -5,34 +5,26 @@ import {
   Customer,
   PurchaseEntry,
   Order,
-  initialItems,
-  initialVendors,
-  initialCustomers,
-  initialPurchases,
-  initialExpenses,
-  initialOrders,
+  Recipe,
 } from "@/lib/mockData"
 import {
-  isDemoMode,
   ITEMS_STORAGE_KEY,
   VENDORS_STORAGE_KEY,
   CUSTOMERS_STORAGE_KEY,
   PURCHASES_STORAGE_KEY,
   EXPENSES_STORAGE_KEY,
   ORDERS_STORAGE_KEY,
+  RECIPES_STORAGE_KEY,
 } from "@/lib/data-management"
 
 // --- ITEMS SERVICE ---
 export async function fetchItems(): Promise<Item[]> {
-  const isDemo = isDemoMode()
-  if (isDemo) return initialItems
-
   if (typeof window !== "undefined") {
     const cached = localStorage.getItem(ITEMS_STORAGE_KEY)
     if (cached) {
       try {
         const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed)) return parsed
       } catch {
         // ignore
       }
@@ -43,7 +35,7 @@ export async function fetchItems(): Promise<Item[]> {
     try {
       const supabase = createClient()
       const { data, error } = await supabase.from("items").select("*").order("name")
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         const mapped: Item[] = data.map((d) => ({
           id: d.id,
           name: d.name,
@@ -72,7 +64,7 @@ export async function saveItemToDb(item: Item): Promise<void> {
     try {
       const supabase = createClient()
       await supabase.from("items").upsert({
-        id: item.id.length > 20 ? item.id : undefined, // only pass if valid uuid
+        id: item.id.length > 20 ? item.id : undefined,
         name: item.name,
         category: item.category,
         current_price: item.currentPrice,
@@ -89,15 +81,12 @@ export async function saveItemToDb(item: Item): Promise<void> {
 
 // --- VENDORS SERVICE ---
 export async function fetchVendors(): Promise<Vendor[]> {
-  const isDemo = isDemoMode()
-  if (isDemo) return initialVendors
-
   if (typeof window !== "undefined") {
     const cached = localStorage.getItem(VENDORS_STORAGE_KEY)
     if (cached) {
       try {
         const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed)) return parsed
       } catch {
         // ignore
       }
@@ -108,7 +97,7 @@ export async function fetchVendors(): Promise<Vendor[]> {
     try {
       const supabase = createClient()
       const { data, error } = await supabase.from("vendors").select("*").order("name")
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         const mapped: Vendor[] = data.map((d) => ({
           id: d.id,
           name: d.name,
@@ -155,17 +144,78 @@ export async function saveVendorToDb(vendor: Vendor): Promise<void> {
   }
 }
 
+// --- CUSTOMERS SERVICE ---
+export async function fetchCustomers(): Promise<Customer[]> {
+  if (typeof window !== "undefined") {
+    const cached = localStorage.getItem(CUSTOMERS_STORAGE_KEY)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed)) return parsed
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase.from("customers").select("*").order("name")
+      if (!error && data) {
+        const mapped: Customer[] = data.map((d) => ({
+          id: d.id,
+          customerNumber: d.customer_number || "",
+          name: d.name,
+          mobile: d.mobile || "",
+          type: d.type || "Retail",
+          address: d.address || "",
+          gstin: d.gstin || "",
+          reference: d.reference || "",
+          status: d.status || "ACTIVE",
+        }))
+        if (typeof window !== "undefined") {
+          localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(mapped))
+        }
+        return mapped
+      }
+    } catch (e) {
+      console.warn("Supabase fetchCustomers error:", e)
+    }
+  }
+
+  return []
+}
+
+export async function saveCustomerToDb(customer: Customer): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      await supabase.from("customers").upsert({
+        id: customer.id.length > 20 ? customer.id : undefined,
+        customer_number: customer.customerNumber,
+        name: customer.name,
+        mobile: customer.mobile,
+        type: customer.type,
+        address: customer.address,
+        gstin: customer.gstin,
+        reference: customer.reference,
+        status: customer.status,
+      })
+    } catch (e) {
+      console.warn("Supabase saveCustomer error:", e)
+    }
+  }
+}
+
 // --- PURCHASES SERVICE ---
 export async function fetchPurchases(): Promise<PurchaseEntry[]> {
-  const isDemo = isDemoMode()
-  if (isDemo) return initialPurchases
-
   if (typeof window !== "undefined") {
     const cached = localStorage.getItem(PURCHASES_STORAGE_KEY)
     if (cached) {
       try {
         const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed)) return parsed
       } catch {
         // ignore
       }
@@ -176,7 +226,7 @@ export async function fetchPurchases(): Promise<PurchaseEntry[]> {
     try {
       const supabase = createClient()
       const { data, error } = await supabase.from("purchases").select("*").order("purchase_date", { ascending: false })
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         const mapped: PurchaseEntry[] = data.map((d) => ({
           id: d.id,
           date: d.purchase_date,
@@ -211,7 +261,7 @@ export async function savePurchaseToDb(entry: PurchaseEntry): Promise<void> {
       await supabase.from("purchases").upsert({
         id: entry.id.length > 20 ? entry.id : undefined,
         purchase_date: entry.purchaseDate || entry.date,
-        month_group: entry.monthGroup || "March 2026",
+        month_group: entry.monthGroup || "Active",
         item_name: entry.itemName,
         lot_number: entry.lotNumber || "",
         vendor_name: entry.vendorName,
@@ -229,15 +279,12 @@ export async function savePurchaseToDb(entry: PurchaseEntry): Promise<void> {
 
 // --- EXPENSES SERVICE ---
 export async function fetchExpenses(): Promise<any[]> {
-  const isDemo = isDemoMode()
-  if (isDemo) return initialExpenses
-
   if (typeof window !== "undefined") {
     const cached = localStorage.getItem(EXPENSES_STORAGE_KEY)
     if (cached) {
       try {
         const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        if (Array.isArray(parsed)) return parsed
       } catch {
         // ignore
       }
@@ -248,7 +295,7 @@ export async function fetchExpenses(): Promise<any[]> {
     try {
       const supabase = createClient()
       const { data, error } = await supabase.from("expenses").select("*").order("expense_date", { ascending: false })
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         const mapped = data.map((d) => ({
           id: d.id,
           date: d.expense_date,
@@ -271,4 +318,150 @@ export async function fetchExpenses(): Promise<any[]> {
   }
 
   return []
+}
+
+// --- RECIPES SERVICE ---
+export async function fetchRecipes(): Promise<Recipe[]> {
+  if (typeof window !== "undefined") {
+    const cached = localStorage.getItem(RECIPES_STORAGE_KEY)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed)) return parsed
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase.from("recipes").select("*").order("name")
+      if (!error && data) {
+        const mapped: Recipe[] = data.map((d) => ({
+          id: d.id,
+          name: d.name,
+          outputYield: parseFloat(d.output_yield) || 0,
+          outputUnit: d.output_unit || "Kg",
+          additionalExpense: parseFloat(d.additional_expense) || 0,
+          additionalCostName: d.additional_cost_name || "",
+          calculatedCostPerKg: parseFloat(d.calculated_cost_per_kg) || 0,
+          videoUrl: d.video_url || "",
+          ingredients: d.ingredients || [],
+          processSteps: d.process_steps || [],
+          equipment: d.equipment || [],
+        }))
+        if (typeof window !== "undefined") {
+          localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(mapped))
+        }
+        return mapped
+      }
+    } catch {
+      // recipes table may not exist in user supabase, fallback to local storage
+    }
+  }
+
+  return []
+}
+
+export async function saveRecipeToDb(recipe: Recipe): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      await supabase.from("recipes").upsert({
+        id: recipe.id.length > 20 ? recipe.id : undefined,
+        name: recipe.name,
+        output_yield: recipe.outputYield,
+        output_unit: recipe.outputUnit,
+        additional_expense: recipe.additionalExpense,
+        additional_cost_name: recipe.additionalCostName,
+        calculated_cost_per_kg: recipe.calculatedCostPerKg,
+        video_url: recipe.videoUrl,
+        ingredients: recipe.ingredients,
+        process_steps: recipe.processSteps,
+        equipment: recipe.equipment,
+      })
+    } catch {
+      // ignore if table not created
+    }
+  }
+}
+
+// --- ORDERS SERVICE ---
+export async function fetchOrders(): Promise<Order[]> {
+  if (typeof window !== "undefined") {
+    const cached = localStorage.getItem(ORDERS_STORAGE_KEY)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed)) return parsed
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase.from("orders").select("*")
+      if (!error && data && data.length > 0) {
+        const mapped: Order[] = data.map((d: any) => ({
+          id: d.id,
+          orderNumber: d.order_number,
+          orderDate: d.order_date,
+          deliveryDate: d.delivery_date,
+          customerName: d.customer_name,
+          customerType: d.customer_type || "Retail",
+          contactNumber: d.contact_number || "",
+          address: d.address || "",
+          items: d.items || [],
+          additionalChargeName: d.additional_charge_name,
+          additionalChargeAmount: d.additional_charge_amount,
+          totalAmount: d.total_amount || 0,
+          paymentReceived: d.payment_received || 0,
+          installments: d.installments || [],
+          status: d.status || "Pending",
+          notes: d.notes,
+        }))
+        if (typeof window !== "undefined") {
+          localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(mapped))
+        }
+        return mapped
+      }
+    } catch {
+      // ignore if table not created
+    }
+  }
+
+  return []
+}
+
+export async function saveOrderToDb(order: Order): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      await supabase.from("orders").upsert({
+        id: order.id.length > 20 ? order.id : undefined,
+        order_number: order.orderNumber,
+        order_date: order.orderDate,
+        delivery_date: order.deliveryDate,
+        customer_name: order.customerName,
+        customer_type: order.customerType,
+        contact_number: order.contactNumber,
+        address: order.address,
+        items: order.items,
+        additional_charge_name: order.additionalChargeName,
+        additional_charge_amount: order.additionalChargeAmount,
+        total_amount: order.totalAmount,
+        payment_received: order.paymentReceived,
+        installments: order.installments,
+        status: order.status,
+        notes: order.notes,
+      })
+    } catch {
+      // ignore if table not created
+    }
+  }
 }

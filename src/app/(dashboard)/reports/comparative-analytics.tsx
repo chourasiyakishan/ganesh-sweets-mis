@@ -407,7 +407,23 @@ function getItemPeriodData(
 }
 
 
-export function ComparativeAnalytics() {
+import { PurchaseEntry } from "@/lib/mockData"
+
+export function ComparativeAnalytics({ purchases = [] }: { purchases?: PurchaseEntry[] }) {
+  if (!purchases || purchases.length === 0) {
+    return (
+      <Card className="border border-border shadow-card p-10 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
+          <TrendingUp className="h-6 w-6" />
+        </div>
+        <h3 className="text-base font-bold text-foreground">No Comparative Purchase Data Available</h3>
+        <p className="text-xs text-muted-foreground max-w-md mx-auto">
+          Comparative analytics (Month-over-Month, Quarter-over-Quarter, Year-over-Year) will automatically calculate once procurement entries are recorded in the Purchases ledger.
+        </p>
+      </Card>
+    )
+  }
+
   const [mode, setMode] = useState<ComparisonMode>("MOM")
   const [viewType, setViewType] = useState<"BREAKUP" | "CUMULATIVE">("BREAKUP")
 

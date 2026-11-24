@@ -88,15 +88,8 @@ export default function PurchasesPage() {
           return
         }
       }
-      // Demo mode is explicitly true only when enabled by user
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
-      if (isDemo) {
-        setPurchases(initialPurchases)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(initialPurchases))
-      } else {
-        setPurchases([])
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
-      }
+      setPurchases([])
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
     } catch (e) {
       console.error("Failed to read from localStorage:", e)
     }

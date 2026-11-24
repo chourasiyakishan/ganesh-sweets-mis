@@ -170,7 +170,23 @@ const HISTORICAL_MONTHLY_RATES: MonthlyRateRecord[] = [
   { month: "Oct 2024", sortKey: "2024-10", fy: "FY 2024-25", quarter: "Q3 FY 2024-25", itemName: "Sweet Boxes (500g)", category: "Packaging", unit: "Pcs", avgRate: 12.5, minRate: 12.0, maxRate: 13.0, totalQty: 1500, totalSpend: 18750, vendor: "Gujarat Packaging Works" },
 ]
 
-export function PriceHistoryAnalytics() {
+import { PurchaseEntry } from "@/lib/mockData"
+
+export function PriceHistoryAnalytics({ purchases = [] }: { purchases?: PurchaseEntry[] }) {
+  if (!purchases || purchases.length === 0) {
+    return (
+      <Card className="border border-border shadow-card p-10 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
+          <BarChart3 className="h-6 w-6" />
+        </div>
+        <h3 className="text-base font-bold text-foreground">No Price History Available</h3>
+        <p className="text-xs text-muted-foreground max-w-md mx-auto">
+          Raw material price history and rate fluctuation graphs will automatically populate as purchases are logged for ingredients over time.
+        </p>
+      </Card>
+    )
+  }
+
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL")
   const [selectedMaterial, setSelectedMaterial] = useState<string>("Pure Cow Ghee")
   const [timeframe, setTimeframe] = useState<TimeframeOption>("6M")

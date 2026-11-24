@@ -271,6 +271,21 @@ create table if not exists orders (
   status text default 'Pending',
   notes text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table if not exists recipes (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  output_yield numeric default 0,
+  output_unit text default 'kg',
+  additional_expense numeric default 0,
+  additional_cost_name text,
+  calculated_cost_per_kg numeric default 0,
+  video_url text,
+  ingredients jsonb default '[]'::jsonb,
+  process_steps jsonb default '[]'::jsonb,
+  equipment jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );`
 
   const handleCopySql = () => {

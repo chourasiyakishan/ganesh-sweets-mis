@@ -39,7 +39,6 @@ export default function VendorsPage() {
 
   const loadVendors = () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
       const stored = localStorage.getItem(VENDORS_STORAGE_KEY)
       if (stored !== null) {
         const parsed = JSON.parse(stored)
@@ -48,15 +47,10 @@ export default function VendorsPage() {
           return
         }
       }
-      if (isDemo) {
-        setVendors(initialVendors)
-        localStorage.setItem(VENDORS_STORAGE_KEY, JSON.stringify(initialVendors))
-      } else {
-        setVendors([])
-        fetchVendors().then((dbVendors) => {
-          if (dbVendors && dbVendors.length > 0) setVendors(dbVendors)
-        })
-      }
+      setVendors([])
+      fetchVendors().then((dbVendors) => {
+        if (dbVendors && dbVendors.length > 0) setVendors(dbVendors)
+      })
     } catch (e) {
       console.error("Failed to load vendors:", e)
     }

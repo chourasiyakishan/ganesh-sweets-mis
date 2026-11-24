@@ -46,13 +46,7 @@ import { useRouter } from "next/navigation"
 import { formatINR } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
 import {
-  initialItems,
   initialCategories,
-  initialVendors,
-  initialCustomers,
-  initialRecipes,
-  initialOrders,
-  initialPurchases,
   Item,
   Vendor,
   Customer,
@@ -60,8 +54,14 @@ import {
   Order,
   PurchaseEntry,
 } from "@/lib/mockData"
-
-const PURCHASES_STORAGE_KEY = "ganesh_sweets_purchases"
+import {
+  fetchItems,
+  fetchVendors,
+  fetchCustomers,
+  fetchRecipes,
+  fetchOrders,
+  fetchPurchases,
+} from "@/lib/supabase/data-service"
 
 export function Topbar() {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -97,34 +97,53 @@ export function Topbar() {
     return user.name.slice(0, 2).toUpperCase()
   }, [user?.name])
 
-  // Real-time Master & Ledger Records
-  const [itemsList] = useState<Item[]>(initialItems)
+  // Real-time Master & Ledger Records for Global Search
+  const [itemsList, setItemsList] = useState<Item[]>([])
   const [categoriesList] = useState<string[]>(initialCategories)
-  const [vendorsList] = useState<Vendor[]>(initialVendors)
-  const [customersList] = useState<Customer[]>(initialCustomers)
-  const [recipesList] = useState<Recipe[]>(initialRecipes)
-  const [ordersList] = useState<Order[]>(initialOrders)
-  const [purchasesList, setPurchasesList] = useState<PurchaseEntry[]>(initialPurchases)
+  const [vendorsList, setVendorsList] = useState<Vendor[]>([])
+  const [customersList, setCustomersList] = useState<Customer[]>([])
+  const [recipesList, setRecipesList] = useState<Recipe[]>([])
+  const [ordersList, setOrdersList] = useState<Order[]>([])
+  const [purchasesList, setPurchasesList] = useState<PurchaseEntry[]>([])
 
-  // Sync purchases from localStorage
-  useEffect(() => {
-    const loadPurchases = () => {
-      try {
-        const stored = localStorage.getItem(PURCHASES_STORAGE_KEY)
-        if (stored) {
-          const parsed = JSON.parse(stored)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setPurchasesList(parsed)
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load purchases in Topbar:", e)
-      }
+  // Load and sync real ledger records across all modules
+  const loadAllSearchData = async () => {
+    try {
+      const [it, v, c, r, ord, pur] = await Promise.all([
+        fetchItems(),
+        fetchVendors(),
+        fetchCustomers(),
+        fetchRecipes(),
+        fetchOrders(),
+        fetchPurchases(),
+      ])
+      setItemsList(it)
+      setVendorsList(v)
+      setCustomersList(c)
+      setRecipesList(r)
+      setOrdersList(ord)
+      setPurchasesList(pur)
+    } catch (e) {
+      console.error("Failed to load search data in Topbar:", e)
     }
+  }
 
-    loadPurchases()
-    window.addEventListener("purchases-updated", loadPurchases)
-    return () => window.removeEventListener("purchases-updated", loadPurchases)
+  useEffect(() => {
+    loadAllSearchData()
+    window.addEventListener("items-updated", loadAllSearchData)
+    window.addEventListener("vendors-updated", loadAllSearchData)
+    window.addEventListener("customers-updated", loadAllSearchData)
+    window.addEventListener("recipes-updated", loadAllSearchData)
+    window.addEventListener("orders-updated", loadAllSearchData)
+    window.addEventListener("purchases-updated", loadAllSearchData)
+    return () => {
+      window.removeEventListener("items-updated", loadAllSearchData)
+      window.removeEventListener("vendors-updated", loadAllSearchData)
+      window.removeEventListener("customers-updated", loadAllSearchData)
+      window.removeEventListener("recipes-updated", loadAllSearchData)
+      window.removeEventListener("orders-updated", loadAllSearchData)
+      window.removeEventListener("purchases-updated", loadAllSearchData)
+    }
   }, [])
 
   // Theme & keyboard shortcut listener

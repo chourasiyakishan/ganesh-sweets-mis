@@ -38,14 +38,22 @@ import {
 } from "@/components/ui/dialog"
 import { formatINR, formatDate, formatRelativeDate } from "@/lib/utils"
 import {
-  initialPurchases,
-  initialOrders,
-  initialItems,
-  initialVendors,
-  initialExpenses,
   PurchaseEntry,
   ExpenseEntry,
+  Item,
+  Vendor,
+  Recipe,
+  Order,
 } from "@/lib/mockData"
+import {
+  fetchPurchases,
+  fetchExpenses,
+  fetchItems,
+  fetchVendors,
+  fetchRecipes,
+  fetchOrders,
+  savePurchaseToDb,
+} from "@/lib/supabase/data-service"
 import { ViewCustomizer, ViewElementOption } from "@/components/common/view-customizer"
 import { toast } from "sonner"
 import * as XLSX from "xlsx"
@@ -114,39 +122,32 @@ export default function DashboardPage() {
   const [unit, setUnit] = useState("Kg")
   const [rate, setRate] = useState("")
   const [lotNumber, setLotNumber] = useState("")
-  const [purchasesList, setPurchasesList] = useState<PurchaseEntry[]>(initialPurchases)
-  const [expensesList, setExpensesList] = useState<ExpenseEntry[]>(initialExpenses)
+  const [purchasesList, setPurchasesList] = useState<PurchaseEntry[]>([])
+  const [expensesList, setExpensesList] = useState<ExpenseEntry[]>([])
+  const [itemsList, setItemsList] = useState<Item[]>([])
+  const [vendorsList, setVendorsList] = useState<Vendor[]>([])
+  const [recipesList, setRecipesList] = useState<Recipe[]>([])
+  const [ordersList, setOrdersList] = useState<Order[]>([])
 
-  // Load purchases and expenses from localStorage
-  const loadDashboardData = () => {
+  // Load all dashboard ledgers from live data services
+  const loadDashboardData = async () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
-
-      const storedPurchases = localStorage.getItem(STORAGE_KEY)
-      if (storedPurchases !== null) {
-        const parsed = JSON.parse(storedPurchases)
-        if (Array.isArray(parsed)) {
-          setPurchasesList(parsed)
-        }
-      } else if (!isDemo) {
-        setPurchasesList([])
-      } else {
-        setPurchasesList(initialPurchases)
-      }
-
-      const storedExpenses = localStorage.getItem(EXPENSES_STORAGE_KEY)
-      if (storedExpenses !== null) {
-        const parsed = JSON.parse(storedExpenses)
-        if (Array.isArray(parsed)) {
-          setExpensesList(parsed)
-        }
-      } else if (!isDemo) {
-        setExpensesList([])
-      } else {
-        setExpensesList(initialExpenses)
-      }
+      const [p, exp, it, v, r, ord] = await Promise.all([
+        fetchPurchases(),
+        fetchExpenses(),
+        fetchItems(),
+        fetchVendors(),
+        fetchRecipes(),
+        fetchOrders(),
+      ])
+      setPurchasesList(p)
+      setExpensesList(exp)
+      setItemsList(it)
+      setVendorsList(v)
+      setRecipesList(r)
+      setOrdersList(ord)
     } catch (e) {
-      console.error("Failed to load data from localStorage on Dashboard:", e)
+      console.error("Failed to load dashboard data:", e)
     }
   }
 
@@ -158,15 +159,19 @@ export default function DashboardPage() {
   useEffect(() => {
     window.addEventListener("purchases-updated", loadDashboardData)
     window.addEventListener("expenses-updated", loadDashboardData)
+    window.addEventListener("items-updated", loadDashboardData)
+    window.addEventListener("vendors-updated", loadDashboardData)
+    window.addEventListener("recipes-updated", loadDashboardData)
+    window.addEventListener("orders-updated", loadDashboardData)
     window.addEventListener("data-cleared", loadDashboardData)
-    window.addEventListener("data-restored", loadDashboardData)
-    window.addEventListener("storage", loadDashboardData)
     return () => {
       window.removeEventListener("purchases-updated", loadDashboardData)
       window.removeEventListener("expenses-updated", loadDashboardData)
+      window.removeEventListener("items-updated", loadDashboardData)
+      window.removeEventListener("vendors-updated", loadDashboardData)
+      window.removeEventListener("recipes-updated", loadDashboardData)
+      window.removeEventListener("orders-updated", loadDashboardData)
       window.removeEventListener("data-cleared", loadDashboardData)
-      window.removeEventListener("data-restored", loadDashboardData)
-      window.removeEventListener("storage", loadDashboardData)
     }
   }, [])
 
@@ -175,14 +180,14 @@ export default function DashboardPage() {
 
   const handleItemSelect = (itemId: string) => {
     setSelectedItem(itemId)
-    const item = initialItems.find((i) => i.id === itemId)
+    const item = itemsList.find((i) => i.id === itemId)
     if (item) {
       setUnit(item.unit)
       setRate(item.currentPrice.toString())
     }
   }
 
-  const handleQuickPurchaseSubmit = (e: React.FormEvent) => {
+  const handleQuickPurchaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!selectedItem || !selectedVendor || !quantity || !rate) {
@@ -190,24 +195,25 @@ export default function DashboardPage() {
       return
     }
 
-    const item = initialItems.find((i) => i.id === selectedItem)
-    const vendor = initialVendors.find((v) => v.id === selectedVendor)
+    const item = itemsList.find((i) => i.id === selectedItem)
+    const vendor = vendorsList.find((v) => v.id === selectedVendor)
     const now = new Date()
     const todayStr = now.toISOString().split("T")[0]
-    const monthStr = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+    const monthStr = now.toLocaleDateString("en-US", { month: "long", year: "numeric" })
 
     const newPurchase: PurchaseEntry = {
       id: `p-${Date.now()}`,
       date: "Just now",
       purchaseDate: todayStr,
       monthGroup: monthStr,
-      itemName: item?.name || "Raw Material",
+      itemName: item?.name || selectedItem,
       lotNumber: lotNumber ? `Lot #${lotNumber}` : undefined,
-      vendorName: vendor?.name || "Vendor",
+      vendorName: vendor?.name || selectedVendor,
       quantity: parseFloat(quantity),
       unit,
       rate: parseFloat(rate),
       total: totalAmount,
+      remarks: "Quick Counter Entry",
     }
 
     const updatedList = [newPurchase, ...purchasesList]
@@ -217,8 +223,9 @@ export default function DashboardPage() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList))
       window.dispatchEvent(new Event("purchases-updated"))
     } catch (e) {
-      console.error("Failed to save quick purchase to localStorage:", e)
+      console.error("Failed to save quick purchase:", e)
     }
+    await savePurchaseToDb(newPurchase)
 
     toast.success(`Purchase recorded: ${newPurchase.itemName} (${formatINR(totalAmount)})`)
 
@@ -231,47 +238,48 @@ export default function DashboardPage() {
 
   // Summary Metrics — Dynamic This Month Purchases
   const { currentMonthPurchasesTotal, currentMonthPurchaseCount } = useMemo(() => {
-    const activePrefix = "2026-03"
+    const activePrefix = new Date().toISOString().slice(0, 7)
+    const activeMonthName = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }).toLowerCase()
     const currentRecords = purchasesList.filter(
-      (p) => p.purchaseDate?.startsWith(activePrefix) || p.monthGroup?.toLowerCase().includes("march 2026")
+      (p) => p.purchaseDate?.startsWith(activePrefix) || p.monthGroup?.toLowerCase() === activeMonthName
     )
-    const records = currentRecords.length > 0 ? currentRecords : purchasesList
     return {
-      currentMonthPurchasesTotal: records.reduce((sum, p) => sum + p.total, 0),
-      currentMonthPurchaseCount: records.length,
+      currentMonthPurchasesTotal: currentRecords.reduce((sum, p) => sum + (p.total || 0), 0),
+      currentMonthPurchaseCount: currentRecords.length,
     }
   }, [purchasesList])
 
-  const pendingOrdersCount = initialOrders.filter((o) => o.status === "Pending" || o.status === "Prep").length
+  const pendingOrdersCount = ordersList.filter((o) => o.status === "Pending" || o.status === "Prep").length
 
   // Expenses summary metrics (calculated dynamically from live expensesList)
   const { currentMonthExpensesTotal, currentMonthVoucherCount } = useMemo(() => {
-    const currentMonthPrefix = "2026-03"
+    const activePrefix = new Date().toISOString().slice(0, 7)
+    const activeMonthName = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }).toLowerCase()
     const currentRecords = expensesList.filter(
-      (e) => e.expenseDate.startsWith(currentMonthPrefix) || e.monthGroup?.toLowerCase().includes("march 2026")
+      (e) => e.expenseDate?.startsWith(activePrefix) || e.monthGroup?.toLowerCase() === activeMonthName
     )
     return {
-      currentMonthExpensesTotal: currentRecords.reduce((sum, e) => sum + e.amount, 0),
+      currentMonthExpensesTotal: currentRecords.reduce((sum, e) => sum + (e.amount || 0), 0),
       currentMonthVoucherCount: currentRecords.length,
     }
   }, [expensesList])
 
   // Daily Report State
   const [isDailyReportOpen, setIsDailyReportOpen] = useState(false)
-  const [selectedReportDate, setSelectedReportDate] = useState("2026-03-15")
+  const [selectedReportDate, setSelectedReportDate] = useState(() => new Date().toISOString().split("T")[0])
 
   // Daily Report Data Derivation
   const dailyReportData = useMemo(() => {
     const dayPurchases = purchasesList.filter(
-      (p) => p.purchaseDate === selectedReportDate || p.date.includes("15 Mar")
+      (p) => p.purchaseDate === selectedReportDate
     )
     const dayExpenses = expensesList.filter(
-      (e) => e.expenseDate === selectedReportDate || e.date.includes("15 Mar")
+      (e) => e.expenseDate === selectedReportDate
     )
-    const dayOrders = initialOrders.filter((o) => o.status === "Pending" || o.status === "Prep")
+    const dayOrders = ordersList.filter((o) => o.status === "Pending" || o.status === "Prep")
 
-    const totalPurchasesAmt = dayPurchases.reduce((sum, p) => sum + p.total, 0)
-    const totalExpensesAmt = dayExpenses.reduce((sum, e) => sum + e.amount, 0)
+    const totalPurchasesAmt = dayPurchases.reduce((sum, p) => sum + (p.total || 0), 0)
+    const totalExpensesAmt = dayExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
 
     return {
       purchases: dayPurchases,
@@ -281,7 +289,7 @@ export default function DashboardPage() {
       totalExpensesAmt,
       totalOutflow: totalPurchasesAmt + totalExpensesAmt,
     }
-  }, [purchasesList, expensesList, selectedReportDate])
+  }, [purchasesList, expensesList, ordersList, selectedReportDate])
 
   const handleExportDailyExcel = () => {
     const dataToExport: any[] = []
@@ -520,11 +528,11 @@ export default function DashboardPage() {
                     </div>
                     <div className="mt-3">
                       <div className="text-headline font-bold text-foreground">
-                        {initialItems.length} Items
+                        {itemsList.length} Items
                       </div>
                       <div className="flex items-center justify-between mt-1">
                         <p className="text-xs text-muted-foreground">
-                          Across 5 master categories
+                          In Master Raw Materials
                         </p>
                         <Link
                           href="/items"
@@ -610,7 +618,7 @@ export default function DashboardPage() {
                                   <SelectValue placeholder="Select raw material..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {initialItems.map((item) => (
+                                  {itemsList.map((item) => (
                                     <SelectItem key={item.id} value={item.id}>
                                       {item.name} ({formatINR(item.currentPrice)}/{item.unit})
                                     </SelectItem>
@@ -629,9 +637,9 @@ export default function DashboardPage() {
                                   <SelectValue placeholder="Select vendor..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {initialVendors.map((vendor) => (
+                                  {vendorsList.map((vendor) => (
                                     <SelectItem key={vendor.id} value={vendor.id}>
-                                      {vendor.name} ({vendor.code})
+                                      {vendor.name} ({vendor.code || "Vendor"})
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -786,35 +794,42 @@ export default function DashboardPage() {
                         </Link>
                       </CardHeader>
                       <CardContent className="p-4 space-y-3">
-                        {initialOrders.slice(0, 3).map((order) => (
-                          <div key={order.id} className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-all space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-foreground">{order.customerName}</span>
-                              <Badge
-                                className={
-                                  order.status === "Packed"
-                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                    : order.status === "Prep"
-                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                                    : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                                }
-                              >
-                                {order.status}
-                              </Badge>
-                            </div>
-                            <div className="text-xs text-muted-foreground space-y-0.5">
-                              <p className="line-clamp-1">
-                                {order.items.map((i) => `${i.itemName} (${i.quantity}${i.unit})`).join(", ")}
-                              </p>
-                              <div className="flex items-center justify-between pt-1">
-                                <span className="text-[11px] font-semibold text-deep-green flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" /> Due {formatDate(order.deliveryDate)} ({formatRelativeDate(order.deliveryDate)})
-                                </span>
-                                <span className="font-bold text-saffron">{formatINR(order.totalAmount)}</span>
+                        {ordersList.length === 0 ? (
+                          <div className="py-6 text-center text-xs text-muted-foreground">
+                            <p className="font-semibold text-foreground">No upcoming deliveries</p>
+                            <p className="text-[11px] mt-1">Book customer orders to track deliveries and schedules here.</p>
+                          </div>
+                        ) : (
+                          ordersList.slice(0, 3).map((order) => (
+                            <div key={order.id} className="p-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-all space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-foreground">{order.customerName}</span>
+                                <Badge
+                                  className={
+                                    order.status === "Packed"
+                                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                      : order.status === "Prep"
+                                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                      : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                  }
+                                >
+                                  {order.status}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground space-y-0.5">
+                                <p className="line-clamp-1">
+                                  {order.items.map((i) => `${i.itemName} (${i.quantity}${i.unit})`).join(", ")}
+                                </p>
+                                <div className="flex items-center justify-between pt-1">
+                                  <span className="text-[11px] font-semibold text-deep-green flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" /> Due {formatDate(order.deliveryDate)} ({formatRelativeDate(order.deliveryDate)})
+                                  </span>
+                                  <span className="font-bold text-saffron">{formatINR(order.totalAmount)}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))
+                        )}
                       </CardContent>
                     </Card>
                   )}
@@ -827,19 +842,39 @@ export default function DashboardPage() {
                           <span className="text-label text-saffron">Featured Recipe Cost</span>
                           <ChefHat className="h-5 w-5 text-saffron" />
                         </div>
-                        <div>
-                          <h3 className="text-title font-bold text-foreground">Kaju Katli</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">Calculated cost based on live Kaju & Sugar rates</p>
-                        </div>
-                        <div className="flex items-baseline justify-between pt-2 border-t border-saffron/20 dark:border-saffron/40">
-                          <span className="text-xs font-medium text-muted-foreground">Current Cost per kg:</span>
-                          <span className="text-headline font-bold text-saffron">{formatINR(485)}</span>
-                        </div>
-                        <Link href="/recipes">
-                          <Button className="w-full mt-2 bg-primary hover:bg-saffron-dark text-primary-foreground text-xs font-semibold">
-                            Open Recipe Costing Calculator
-                          </Button>
-                        </Link>
+                        {recipesList.length > 0 ? (
+                          <>
+                            <div>
+                              <h3 className="text-title font-bold text-foreground">{recipesList[0].name}</h3>
+                              <p className="text-xs text-muted-foreground mt-0.5">Live batch cost based on current ingredient purchase rates</p>
+                            </div>
+                            <div className="flex items-baseline justify-between pt-2 border-t border-saffron/20 dark:border-saffron/40">
+                              <span className="text-xs font-medium text-muted-foreground">Current Cost per {recipesList[0].outputUnit || "kg"}:</span>
+                              <span className="text-headline font-bold text-saffron">
+                                {formatINR(Math.round(recipesList[0].calculatedCostPerKg || 0))}
+                              </span>
+                            </div>
+                            <Link href="/recipes">
+                              <Button className="w-full mt-2 bg-primary hover:bg-saffron-dark text-primary-foreground text-xs font-semibold">
+                                Open Recipe Costing Calculator
+                              </Button>
+                            </Link>
+                          </>
+                        ) : (
+                          <div className="py-2 space-y-3 text-center">
+                            <div>
+                              <h3 className="text-sm font-semibold text-foreground">No Recipes Added Yet</h3>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Create your first sweet recipe to calculate live production cost from ingredient rates.
+                              </p>
+                            </div>
+                            <Link href="/recipes" className="block">
+                              <Button className="w-full bg-primary hover:bg-saffron-dark text-primary-foreground text-xs font-semibold">
+                                Create Recipe
+                              </Button>
+                            </Link>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   )}

@@ -43,7 +43,6 @@ export default function ItemsPage() {
   // Load items from localStorage & Supabase
   const loadItems = () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
       const stored = localStorage.getItem(ITEMS_STORAGE_KEY)
       if (stored !== null) {
         const parsed = JSON.parse(stored)
@@ -52,15 +51,10 @@ export default function ItemsPage() {
           return
         }
       }
-      if (isDemo) {
-        setItems(initialItems)
-        localStorage.setItem(ITEMS_STORAGE_KEY, JSON.stringify(initialItems))
-      } else {
-        setItems([])
-        fetchItems().then((dbItems) => {
-          if (dbItems && dbItems.length > 0) setItems(dbItems)
-        })
-      }
+      setItems([])
+      fetchItems().then((dbItems) => {
+        if (dbItems && dbItems.length > 0) setItems(dbItems)
+      })
     } catch (e) {
       console.error("Failed to load items:", e)
     }

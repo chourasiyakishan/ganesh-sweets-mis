@@ -14,7 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { formatINR, cn } from "@/lib/utils"
-import { initialRecipes, initialItems, Recipe, RecipeIngredient, RecipeProcessStep, RecipeEquipment } from "@/lib/mockData"
+import { Recipe, RecipeIngredient, RecipeProcessStep, RecipeEquipment, Item } from "@/lib/mockData"
+import { RECIPES_STORAGE_KEY } from "@/lib/data-management"
+import { fetchRecipes, saveRecipeToDb, fetchItems } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 // Helper: format total minutes into "Xhr Ymin"
@@ -33,8 +35,37 @@ type StepFormRow = { description: string; estimatedMinutes: string }
 type EquipmentFormRow = { name: string; quantity: string; role: string }
 
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<Recipe[]>(initialRecipes)
+  const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [masterItems, setMasterItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState("")
+  const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null)
+
+  const loadRecipesData = async () => {
+    const loaded = await fetchRecipes()
+    setRecipes(loaded)
+    if (loaded.length > 0 && !expandedRecipeId) {
+      setExpandedRecipeId(loaded[0].id)
+    }
+  }
+
+  const loadItemsData = async () => {
+    const loaded = await fetchItems()
+    setMasterItems(loaded)
+  }
+
+  useEffect(() => {
+    loadRecipesData()
+    loadItemsData()
+
+    window.addEventListener("recipes-updated", loadRecipesData)
+    window.addEventListener("items-updated", loadItemsData)
+    window.addEventListener("data-cleared", loadRecipesData)
+    return () => {
+      window.removeEventListener("recipes-updated", loadRecipesData)
+      window.removeEventListener("items-updated", loadItemsData)
+      window.removeEventListener("data-cleared", loadRecipesData)
+    }
+  }, [])
 
   // Listen for search parameters from URL or Topbar universal search event
   useEffect(() => {
@@ -61,7 +92,6 @@ export default function RecipesPage() {
       window.removeEventListener("popstate", handleUrlParams)
     }
   }, [])
-  const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>("r1")
 
   // Modal State
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -86,10 +116,10 @@ export default function RecipesPage() {
   const [draggedStepIndex, setDraggedStepIndex] = useState<number | null>(null)
   const [dragOverStepIndex, setDragOverStepIndex] = useState<number | null>(null)
 
-  // Alphabetically Sorted Master Items (A-Z)
+  // Alphabetically Sorted Master Items (A-Z) from live items
   const sortedMasterItems = useMemo(() => {
-    return [...initialItems].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
-  }, [])
+    return [...masterItems].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+  }, [masterItems])
 
   // Calculate dynamic live cost per unit for a recipe
   const calculateRecipeCost = (
@@ -299,12 +329,19 @@ export default function RecipesPage() {
   }
 
   // --- Create Recipe Handler ---
-  const handleCreateRecipe = (e: React.FormEvent) => {
+  const handleCreateRecipe = async (e: React.FormEvent) => {
     e.preventDefault()
     const newRecipe = buildRecipeFromForm(`r-${Date.now()}`)
     if (!newRecipe) return
 
-    setRecipes([newRecipe, ...recipes])
+    const updated = [newRecipe, ...recipes]
+    setRecipes(updated)
+    try {
+      localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(updated))
+      window.dispatchEvent(new Event("recipes-updated"))
+    } catch {}
+    await saveRecipeToDb(newRecipe)
+
     setIsAddOpen(false)
     resetFormFields()
     toast.success(`Created recipe card for "${newRecipe.name}" (${formatINR(newRecipe.calculatedCostPerKg)}/${newRecipe.outputUnit})`)
@@ -345,13 +382,20 @@ export default function RecipesPage() {
   }
 
   // --- Update Recipe Handler ---
-  const handleUpdateRecipe = (e: React.FormEvent) => {
+  const handleUpdateRecipe = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingRecipe) return
     const updatedRecipe = buildRecipeFromForm(editingRecipe.id)
     if (!updatedRecipe) return
 
-    setRecipes((prev) => prev.map((r) => (r.id === editingRecipe.id ? updatedRecipe : r)))
+    const updated = recipes.map((r) => (r.id === editingRecipe.id ? updatedRecipe : r))
+    setRecipes(updated)
+    try {
+      localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(updated))
+      window.dispatchEvent(new Event("recipes-updated"))
+    } catch {}
+    await saveRecipeToDb(updatedRecipe)
+
     setIsEditOpen(false)
     setEditingRecipe(null)
     resetFormFields()
@@ -360,7 +404,12 @@ export default function RecipesPage() {
 
   const handleDeleteRecipe = (id: string, name: string) => {
     if (confirm(`Delete recipe card "${name}"?`)) {
-      setRecipes((prev) => prev.filter((r) => r.id !== id))
+      const updated = recipes.filter((r) => r.id !== id)
+      setRecipes(updated)
+      try {
+        localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(updated))
+        window.dispatchEvent(new Event("recipes-updated"))
+      } catch {}
       toast.success(`Recipe "${name}" deleted`)
     }
   }
@@ -715,9 +764,35 @@ export default function RecipesPage() {
         </CardContent>
       </Card>
 
-      {/* Recipe Cards Accordion List */}
-      <div className="space-y-4">
-        {filteredRecipes.map((recipe) => {
+      {/* Recipe Cards Accordion List / Empty State */}
+      {filteredRecipes.length === 0 ? (
+        <Card className="border border-border shadow-card text-center p-12 space-y-4">
+          <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto">
+            <ChefHat className="h-7 w-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-foreground">
+              {searchQuery ? "No matching recipes found" : "No Recipes Added Yet"}
+            </h3>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              {searchQuery
+                ? `No recipe matched "${searchQuery}". Clear your search query or add a new recipe.`
+                : "Your recipe master is clean and ready for real data. Click 'Add New Recipe' to enter your sweet batch formulas, ingredient ratios, and preparation steps."}
+            </p>
+          </div>
+          {!searchQuery && (
+            <Button
+              onClick={() => { resetFormFields(); setIsAddOpen(true) }}
+              className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold"
+            >
+              <Plus className="h-4 w-4 mr-1.5" />
+              Add First Recipe
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {filteredRecipes.map((recipe) => {
           const isExpanded = expandedRecipeId === recipe.id
           const liveCostPerUnit = calculateRecipeCost(recipe.ingredients, recipe.additionalExpense, recipe.outputYield)
           const totalIngCost = recipe.ingredients.reduce((acc, curr) => acc + curr.quantity * curr.currentRate, 0)
@@ -934,7 +1009,8 @@ export default function RecipesPage() {
             </Card>
           )
         })}
-      </div>
+        </div>
+      )}
 
       {/* Modal: Add New Recipe */}
       <Dialog open={isAddOpen} onOpenChange={(open) => { if (!open) resetFormFields(); setIsAddOpen(open) }}>

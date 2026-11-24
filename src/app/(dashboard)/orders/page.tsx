@@ -45,15 +45,10 @@ export default function OrdersPage() {
 
   const loadOrdersAndCustomers = () => {
     try {
-      const isDemo = localStorage.getItem("ganesh_sweets_demo_mode") === "true"
-
       const storedOrders = localStorage.getItem(ORDERS_STORAGE_KEY)
       if (storedOrders !== null) {
         const parsed = JSON.parse(storedOrders)
         if (Array.isArray(parsed)) setOrders(parsed)
-      } else if (isDemo) {
-        setOrders(initialOrders)
-        localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(initialOrders))
       } else {
         setOrders([])
       }
@@ -62,8 +57,6 @@ export default function OrdersPage() {
       if (storedCustomers !== null) {
         const parsed = JSON.parse(storedCustomers)
         if (Array.isArray(parsed)) setCustomersList(parsed)
-      } else if (isDemo) {
-        setCustomersList(initialCustomers)
       } else {
         setCustomersList([])
       }
