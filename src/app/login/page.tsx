@@ -29,8 +29,8 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email.trim()) {
-      toast.error("Please enter your email address")
+    if (!email.trim() || !password.trim()) {
+      toast.error("Please enter both email address and password")
       return
     }
 
@@ -41,10 +41,10 @@ export default function LoginPage() {
         toast.success("Welcome back to Ganesh Sweets MIS!")
         router.push("/dashboard")
       } else {
-        toast.error("Invalid credentials. Please verify your email and password.")
+        toast.error("Invalid credentials. Access denied. Please check your email and password.")
       }
     } catch {
-      toast.error("Sign in failed. Please check your credentials.")
+      toast.error("Sign in failed. Access denied.")
     } finally {
       setLoading(false)
     }

@@ -178,7 +178,7 @@ function NavContent({ collapsed = false, onNavigate }: { collapsed?: boolean; on
             title={collapsed ? "Settings" : undefined}
           >
             <Settings className="h-5 w-5 shrink-0 text-muted-foreground" />
-            {!collapsed && <span className="text-sm font-medium">Settings & Roles</span>}
+            {!collapsed && <span className="text-sm font-medium">Settings</span>}
           </Link>
         </div>
       )}

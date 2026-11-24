@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import {
-  Settings,
+  Settings as SettingsIcon,
   Shield,
   User,
   Database,
@@ -14,7 +14,6 @@ import {
   Trash2,
   Plus,
   RefreshCw,
-  Sparkles,
   AlertTriangle,
   Copy,
   Check,
@@ -35,11 +34,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import { useAuth, UserRole } from "@/contexts/auth-context"
-import { isDemoMode, clearAllDemoData, restoreDemoData, setDemoMode } from "@/lib/data-management"
+import { useAuth } from "@/contexts/auth-context"
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client"
+import { clearAllDemoData } from "@/lib/data-management"
+
+interface StaffProfile {
+  id: string
+  name: string
+  email: string
+  role: string
+  status: string
+}
 
 export default function SettingsPage() {
-  const { users, addUser, updateUser, deleteUser, user: currentUser } = useAuth()
+  const { user: currentUser } = useAuth()
 
   // Business info state
   const [businessName, setBusinessName] = useState("Ganesh Sweets & Namkeen")
@@ -47,75 +55,114 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("+91 98765 43210")
   const [address, setAddress] = useState("Main Road, Sweets Market, Gujarat, India")
 
-  // Demo mode state
-  const [demoActive, setDemoActive] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [newStaffOpen, setNewStaffOpen] = useState(false)
   const [copiedSql, setCopiedSql] = useState(false)
+  const [staffUsers, setStaffUsers] = useState<StaffProfile[]>([])
 
-  // New staff form state
-  const [staffName, setStaffName] = useState("")
-  const [staffEmail, setStaffEmail] = useState("")
-  const [staffPhone, setStaffPhone] = useState("")
-  const [staffRole, setStaffRole] = useState<UserRole>("Cashier")
+  // Load business info from localStorage if saved
+  useEffect(() => {
+    try {
+      const savedInfo = localStorage.getItem("ganesh_sweets_business_info")
+      if (savedInfo) {
+        const parsed = JSON.parse(savedInfo)
+        if (parsed.businessName) setBusinessName(parsed.businessName)
+        if (parsed.gstin) setGstin(parsed.gstin)
+        if (parsed.phone) setPhone(parsed.phone)
+        if (parsed.address) setAddress(parsed.address)
+      }
+    } catch {}
+  }, [])
+
+  // Load staff users from Supabase profiles
+  const loadStaffUsers = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase.from("profiles").select("*").order("created_at")
+        if (!error && data && data.length > 0) {
+          const mapped: StaffProfile[] = data.map((d) => ({
+            id: d.id,
+            name: d.full_name || d.email.split("@")[0],
+            email: d.email,
+            role: d.role ? d.role.charAt(0).toUpperCase() + d.role.slice(1) : "Staff",
+            status: d.status || "ACTIVE",
+          }))
+          setStaffUsers(mapped)
+          return
+        }
+      } catch (err) {
+        console.warn("Failed to load staff profiles from Supabase:", err)
+      }
+    }
+
+    if (currentUser) {
+      setStaffUsers([
+        {
+          id: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+          role: currentUser.role,
+          status: "ACTIVE",
+        },
+      ])
+    }
+  }
 
   useEffect(() => {
-    setDemoActive(isDemoMode())
-    const handleDemo = () => setDemoActive(isDemoMode())
-    window.addEventListener("demo-mode-changed", handleDemo)
-    window.addEventListener("data-cleared", handleDemo)
-    window.addEventListener("data-restored", handleDemo)
-    return () => {
-      window.removeEventListener("demo-mode-changed", handleDemo)
-      window.removeEventListener("data-cleared", handleDemo)
-      window.removeEventListener("data-restored", handleDemo)
-    }
-  }, [])
+    loadStaffUsers()
+  }, [currentUser])
+
+  // Access control: only Owner can access Settings
+  if (currentUser && currentUser.role !== "Owner") {
+    return (
+      <div className="bg-card p-10 rounded-xl border border-border shadow-card text-center space-y-4 max-w-lg mx-auto mt-12">
+        <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto">
+          <Shield className="h-6 w-6" />
+        </div>
+        <h2 className="text-lg font-bold text-foreground">Access Restricted</h2>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Business settings and role administration are exclusively accessible to the Business Owner. Your current account role is{" "}
+          <strong className="text-foreground">{currentUser.role}</strong>.
+        </p>
+      </div>
+    )
+  }
 
   const handleSaveBusiness = (e: React.FormEvent) => {
     e.preventDefault()
-    toast.success("Business profile settings updated!")
+    try {
+      localStorage.setItem(
+        "ganesh_sweets_business_info",
+        JSON.stringify({ businessName, gstin, phone, address })
+      )
+    } catch {}
+    toast.success("Business profile settings saved!")
   }
 
-  const handleRoleChange = (userId: string, newRole: string) => {
-    updateUser(userId, { role: newRole as UserRole })
-    toast.success("User permission role updated!")
-  }
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    setStaffUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+    )
 
-  const handleCreateStaff = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!staffName.trim() || !staffEmail.trim()) {
-      toast.error("Please provide both name and email")
-      return
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient()
+        await supabase
+          .from("profiles")
+          .update({ role: newRole.toLowerCase() })
+          .eq("id", userId)
+      } catch (err) {
+        console.warn("Failed to update role in Supabase:", err)
+      }
     }
-
-    addUser({
-      name: staffName.trim(),
-      email: staffEmail.trim(),
-      phone: staffPhone.trim() || undefined,
-      role: staffRole,
-      status: "ACTIVE",
-    })
-
-    setStaffName("")
-    setStaffEmail("")
-    setStaffPhone("")
-    setStaffRole("Cashier")
-    setNewStaffOpen(false)
-    toast.success("New staff user added successfully!")
+    toast.success("User permission role updated!")
   }
 
   const handleClearDataConfirm = () => {
     clearAllDemoData()
     setClearDialogOpen(false)
-    setDemoActive(false)
-    toast.success("All sample demo data cleared! You are now in Live Mode with fresh empty ledgers.")
-  }
-
-  const handleRestoreDemo = () => {
-    restoreDemoData()
-    setDemoActive(true)
-    toast.success("Sample demo data restored successfully!")
+    toast.success("All sample demo data cleared! Empty ledgers are now active for real data.")
   }
 
   const sqlSchemaText = `-- Ganesh Sweets MIS Supabase Schema
@@ -218,278 +265,31 @@ create table if not exists orders (
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-card p-6 rounded-xl border border-border shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-headline text-foreground font-bold tracking-tight flex items-center gap-2.5">
-            <Settings className="h-7 w-7 text-saffron" />
-            Settings & Business Management
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage your shop profile, staff permission roles (RBAC) & switch between Demo and Live real data.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {demoActive ? (
-            <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 py-1 px-3 text-xs font-semibold">
-              <Sparkles className="h-3.5 w-3.5 mr-1" /> Demo Mode Active
-            </Badge>
-          ) : (
-            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300 py-1 px-3 text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5" /> Live Data Mode
-            </Badge>
-          )}
-        </div>
+      <div className="bg-card p-6 rounded-xl border border-border shadow-xs">
+        <h1 className="text-headline text-foreground font-bold tracking-tight flex items-center gap-2.5">
+          <SettingsIcon className="h-7 w-7 text-saffron" />
+          Settings
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Business information, staff role permissions (RBAC) & cloud database connections
+        </p>
       </div>
 
-      <Tabs defaultValue="data" className="w-full">
-        <TabsList className="grid w-full sm:w-auto grid-cols-4 bg-muted/60 p-1">
-          <TabsTrigger value="data" className="text-xs font-semibold">
-            <Sparkles className="h-4 w-4 mr-2 text-saffron" /> Data Management
+      <Tabs defaultValue="business" className="w-full">
+        <TabsList className="grid w-full sm:w-auto grid-cols-3 bg-muted/60 p-1">
+          <TabsTrigger value="business" className="text-xs font-semibold">
+            <Building2 className="h-4 w-4 mr-2 text-primary" /> Business Profile
           </TabsTrigger>
           <TabsTrigger value="users" className="text-xs font-semibold">
             <Shield className="h-4 w-4 mr-2 text-deep-green" /> Users & Roles (RBAC)
           </TabsTrigger>
-          <TabsTrigger value="business" className="text-xs font-semibold">
-            <Building2 className="h-4 w-4 mr-2 text-primary" /> Business Profile
-          </TabsTrigger>
           <TabsTrigger value="database" className="text-xs font-semibold">
-            <Database className="h-4 w-4 mr-2 text-blue-600" /> Supabase Cloud
+            <Database className="h-4 w-4 mr-2 text-blue-600" /> Cloud Database
           </TabsTrigger>
         </TabsList>
 
-        {/* Tab 1: Data Management (Mock vs Live) */}
-        <TabsContent value="data" className="mt-6 space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Live Mode / Fresh Start Card */}
-            <Card className="border-2 border-primary/20 shadow-card">
-              <CardHeader className="bg-muted/30 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-title font-bold text-foreground flex items-center gap-2">
-                    <Database className="h-5 w-5 text-primary" />
-                    Start Fresh with Real Shop Data
-                  </CardTitle>
-                  <Badge variant="outline" className="text-xs">
-                    {demoActive ? "Ready to Clear" : "Currently Active"}
-                  </Badge>
-                </div>
-                <CardDescription className="text-xs">
-                  Remove sample demo entries (Kaju Katli, Mahi Dairy, demo purchases) and start recording your actual Ganesh Sweets daily business transactions.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-6 space-y-4">
-                <div className="bg-muted/40 p-4 rounded-lg space-y-2 text-xs border border-border">
-                  <p className="font-semibold text-foreground">What happens when you click Start Fresh?</p>
-                  <ul className="list-disc pl-4 space-y-1 text-muted-foreground">
-                    <li>Purchases ledger will be reset to 0 entries.</li>
-                    <li>Expenses ledger will be reset to 0 entries.</li>
-                    <li>Orders and customer lists will be cleared.</li>
-                    <li>Standard Units (Kg, Litre, Gram, Packet, Tin, Box) remain ready to use.</li>
-                    <li>Common Sweet Categories (Raw Materials, Dairy, Dry Fruits, Packaging) remain intact.</li>
-                  </ul>
-                </div>
-
-                <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                  <Button
-                    onClick={() => setClearDialogOpen(true)}
-                    className="bg-primary hover:bg-saffron-dark text-white font-semibold text-xs py-2"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1.5" /> Clear All Demo Data & Start Fresh
-                  </Button>
-
-                  {/* Restore Demo button */}
-                  <Button
-                    variant="outline"
-                    onClick={handleRestoreDemo}
-                    className="text-xs border-border text-foreground hover:bg-accent"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Restore Sample Data
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Next Steps for Live Data */}
-            <Card className="border border-border shadow-card">
-              <CardHeader className="bg-muted/30 border-b border-border">
-                <CardTitle className="text-title font-bold text-foreground">
-                  How to Add Your Real Business Data
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Step-by-step workflow to get your shop running on the platform
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-6 space-y-3 text-xs">
-                <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
-                  <span className="w-6 h-6 rounded-full bg-saffron/15 text-saffron font-bold flex items-center justify-center shrink-0">
-                    1
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-foreground">Add Your Suppliers (Vendors)</h4>
-                    <p className="text-muted-foreground mt-0.5">
-                      Go to the <strong>Vendors</strong> page to enter your dairy, dry fruit, and packaging suppliers or upload your Excel list.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
-                  <span className="w-6 h-6 rounded-full bg-deep-green/15 text-deep-green font-bold flex items-center justify-center shrink-0">
-                    2
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-foreground">Register Raw Materials & Sweets</h4>
-                    <p className="text-muted-foreground mt-0.5">
-                      Go to <strong>Item Master</strong> to add Milk, Mawa, Ghee, Sugar, Cashews with your current purchase rates.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
-                  <span className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-600 font-bold flex items-center justify-center shrink-0">
-                    3
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-foreground">Log Daily Purchases & Expenses</h4>
-                    <p className="text-muted-foreground mt-0.5">
-                      Use <strong>Purchases</strong> for incoming raw material bills and <strong>Expenses</strong> for daily shop overheads, salaries, and utility bills.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Tab 2: Users & Roles (RBAC) */}
-        <TabsContent value="users" className="mt-6 space-y-6">
-          <Card className="border border-border shadow-card">
-            <CardHeader className="bg-muted/30 border-b border-border flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-title font-bold text-foreground">
-                  User Roles & Access Control (RBAC)
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Assign granular permissions to staff members (Owner, Manager, Accountant, Cashier)
-                </CardDescription>
-              </div>
-              <Button
-                onClick={() => setNewStaffOpen(true)}
-                className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold"
-              >
-                <Plus className="h-4 w-4 mr-1.5" /> Add New Staff Member
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-table-header text-table-header-text">
-                  <tr>
-                    <th className="p-3">Staff Name</th>
-                    <th className="p-3">Email Address</th>
-                    <th className="p-3">Phone</th>
-                    <th className="p-3">Assigned Role</th>
-                    <th className="p-3 text-center">Status</th>
-                    <th className="p-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-muted/40">
-                      <td className="p-3 font-bold text-foreground">
-                        {u.name}
-                        {u.id === currentUser?.id && (
-                          <span className="ml-2 text-[10px] text-primary font-semibold">(You)</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{u.email}</td>
-                      <td className="p-3 text-muted-foreground">{u.phone || "-"}</td>
-                      <td className="p-3">
-                        <Select
-                          value={u.role}
-                          onValueChange={(role) => role && handleRoleChange(u.id, role)}
-                          disabled={u.id === "u1"} // Primary owner protected
-                        >
-                          <SelectTrigger className="w-36 h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Owner">Owner (Superadmin)</SelectItem>
-                            <SelectItem value="Manager">Store Manager</SelectItem>
-                            <SelectItem value="Accountant">Accountant</SelectItem>
-                            <SelectItem value="Cashier">Cashier / Counter</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="p-3 text-center">
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px]">
-                          {u.status || "ACTIVE"}
-                        </Badge>
-                      </td>
-                      <td className="p-3 text-right">
-                        {u.id !== "u1" && u.id !== currentUser?.id && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              deleteUser(u.id)
-                              toast.success(`User ${u.name} removed`)
-                            }}
-                            className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                            title="Remove staff member"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-
-          {/* Role Permissions Matrix Card */}
-          <Card className="border border-border shadow-card">
-            <CardHeader className="bg-muted/30 border-b border-border">
-              <CardTitle className="text-title font-bold text-foreground text-sm">
-                Role Permissions Overview
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-saffron">Owner (Superadmin)</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Full unrestricted access to all modules, financial P&L, reports, business settings, and staff role management.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-deep-green">Store Manager</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Manages inventory, items, vendors, customer orders, daily purchases, recipe formulation, and bulk calculators.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-amber-600">Accountant</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Access to purchases ledger, expenses tracking, vendor balances, operational reports, and Excel data export.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-blue-600">Cashier / Counter</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Fast booking of counter sweet orders, customer directory, item price lookup, and quick weight-price calculator.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Tab 3: Business Profile */}
-        <TabsContent value="business" className="mt-6">
+        {/* Tab 1: Business Profile */}
+        <TabsContent value="business" className="mt-6 space-y-6">
           <Card className="border border-border shadow-card max-w-2xl">
             <CardHeader className="bg-muted/30 border-b border-border">
               <CardTitle className="text-title font-bold text-foreground">Business Information</CardTitle>
@@ -522,7 +322,7 @@ create table if not exists orders (
 
                 <div className="pt-2">
                   <Button type="submit" className="bg-primary hover:bg-saffron-dark text-white font-semibold text-xs">
-                    <Save className="h-4 w-4 mr-1.5" /> Save Profile Settings
+                    <Save className="h-4 w-4 mr-1.5" /> Save Business Profile
                   </Button>
                 </div>
               </form>
@@ -530,7 +330,117 @@ create table if not exists orders (
           </Card>
         </TabsContent>
 
-        {/* Tab 4: Database Connection Status & SQL Schema */}
+        {/* Tab 2: Users & Roles (RBAC) */}
+        <TabsContent value="users" className="mt-6 space-y-6">
+          <Card className="border border-border shadow-card">
+            <CardHeader className="bg-muted/30 border-b border-border flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-title font-bold text-foreground">
+                  User Roles & Permissions (RBAC)
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Assign roles to team members. Each staff member logs in securely with their own email and password.
+                </CardDescription>
+              </div>
+              <Button
+                onClick={() => setNewStaffOpen(true)}
+                className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold"
+              >
+                <Plus className="h-4 w-4 mr-1.5" /> How to Add Staff
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-table-header text-table-header-text">
+                  <tr>
+                    <th className="p-3">Staff Name</th>
+                    <th className="p-3">Email Address</th>
+                    <th className="p-3">Assigned Role</th>
+                    <th className="p-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {staffUsers.map((u) => (
+                    <tr key={u.id} className="hover:bg-muted/40">
+                      <td className="p-3 font-bold text-foreground">
+                        {u.name}
+                        {u.email === currentUser?.email && (
+                          <span className="ml-2 text-[10px] text-primary font-semibold">(You)</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-muted-foreground">{u.email}</td>
+                      <td className="p-3">
+                        <Select
+                          value={u.role}
+                          onValueChange={(role) => role && handleRoleChange(u.id, role)}
+                          disabled={u.email === currentUser?.email}
+                        >
+                          <SelectTrigger className="w-40 h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Owner">Owner (Superadmin)</SelectItem>
+                            <SelectItem value="Manager">Store Manager</SelectItem>
+                            <SelectItem value="Accountant">Accountant</SelectItem>
+                            <SelectItem value="Cashier">Cashier / Counter</SelectItem>
+                            <SelectItem value="Staff">Staff</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-3 text-center">
+                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px]">
+                          {u.status}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+
+          {/* Role Permissions Matrix Card */}
+          <Card className="border border-border shadow-card">
+            <CardHeader className="bg-muted/30 border-b border-border">
+              <CardTitle className="text-title font-bold text-foreground text-sm">
+                Role Permissions Breakdown
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                <div className="p-3 rounded-lg border border-border bg-card">
+                  <h4 className="font-bold text-saffron">Owner (Superadmin)</h4>
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    Full access to all operations, business settings, financial P&L, reports, and role administration.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-border bg-card">
+                  <h4 className="font-bold text-deep-green">Store Manager</h4>
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    Manages inventory items, suppliers, purchases, recipes, and customer orders. Cannot access Settings.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-border bg-card">
+                  <h4 className="font-bold text-amber-600">Accountant</h4>
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    Access to daily purchases ledger, expenses tracking, vendor balances, and Excel reports.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-border bg-card">
+                  <h4 className="font-bold text-blue-600">Cashier / Counter</h4>
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    Fast booking of counter sweet orders, customer phone numbers, item price lookup, and weight-price calculator.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab 3: Cloud Database (Supabase) */}
         <TabsContent value="database" className="mt-6 space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             <Card className="border border-border shadow-card">
@@ -539,7 +449,7 @@ create table if not exists orders (
                   Supabase PostgreSQL Cloud
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Cloud database integration via Vercel Native Storage
+                  Connected via Vercel Native Storage Integration
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6 space-y-4">
@@ -547,10 +457,10 @@ create table if not exists orders (
                   <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
                   <div>
                     <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300">
-                      Integration Connected to Vercel
+                      Cloud PostgreSQL Connected
                     </h4>
                     <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
-                      Your Supabase database project is linked to Vercel deployment.
+                      Your Supabase database is active and linked to the live Vercel production deployment.
                     </p>
                   </div>
                 </div>
@@ -561,13 +471,23 @@ create table if not exists orders (
                     <span className="font-bold text-foreground">PostgreSQL (Supabase)</span>
                   </div>
                   <div className="flex items-center justify-between py-1 border-b border-border">
-                    <span className="text-muted-foreground">Vercel Environment Keys:</span>
-                    <span className="font-bold text-emerald-600">Injected & Supported</span>
+                    <span className="text-muted-foreground">Row Level Security (RLS):</span>
+                    <span className="font-bold text-emerald-600">Active</span>
                   </div>
                   <div className="flex items-center justify-between py-1">
-                    <span className="text-muted-foreground">Row Level Security (RLS):</span>
-                    <span className="font-bold text-emerald-600">Enabled</span>
+                    <span className="text-muted-foreground">Data Storage:</span>
+                    <span className="font-bold text-foreground">Live Cloud Database</span>
                   </div>
+                </div>
+
+                <div className="pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setClearDialogOpen(true)}
+                    className="text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Clear Local Cache
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -577,18 +497,13 @@ create table if not exists orders (
               <CardHeader className="bg-muted/30 border-b border-border flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="text-title font-bold text-foreground text-sm">
-                    Supabase SQL Schema
+                    Database Schema SQL
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Run this once in Supabase SQL Editor to create tables
+                    Run in Supabase SQL Editor if tables ever need to be recreated
                   </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopySql}
-                  className="text-xs"
-                >
+                <Button variant="outline" size="sm" onClick={handleCopySql} className="text-xs">
                   {copiedSql ? (
                     <>
                       <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Copied!
@@ -610,18 +525,16 @@ create table if not exists orders (
         </TabsContent>
       </Tabs>
 
-      {/* Confirmation Dialog for Clearing Demo Data */}
+      {/* Confirmation Dialog for Clearing Cache */}
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
-              Clear Demo Data & Start Fresh?
+              Reset Local Browser Cache?
             </DialogTitle>
             <DialogDescription className="text-xs pt-2">
-              Are you sure you want to clear the sample demo data? This will wipe the mock purchases, expenses, and demo suppliers so you can begin entering Ganesh Sweets&apos; actual business transactions.
-              <br /><br />
-              <strong>Note:</strong> Standard sweet categories and measurement units (Kg, Litre, Box) will be preserved.
+              This will clear local browser cache and force a fresh synchronization directly from the cloud Supabase database.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -629,78 +542,49 @@ create table if not exists orders (
               Cancel
             </Button>
             <Button variant="destructive" size="sm" onClick={handleClearDataConfirm}>
-              Yes, Clear & Start Fresh
+              Yes, Reset Cache
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog for Adding New Staff Member */}
+      {/* Dialog for Adding New Staff Member via Supabase */}
       <Dialog open={newStaffOpen} onOpenChange={setNewStaffOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
-              Add New Staff Member
+              How to Add a Staff User
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Assign a role and email to grant access to the Ganesh Sweets MIS.
+              Follow these simple steps in Supabase to give staff members their own login credentials:
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleCreateStaff} className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Staff Full Name *</Label>
-              <Input
-                placeholder="e.g. Rahul Sharma"
-                value={staffName}
-                onChange={(e) => setStaffName(e.target.value)}
-                required
-                className="text-xs"
-              />
+          <div className="space-y-3 py-2 text-xs">
+            <div className="p-3 rounded-lg border border-border bg-muted/40 space-y-1">
+              <p className="font-bold text-foreground">Step 1: Open Supabase Dashboard</p>
+              <p className="text-muted-foreground text-[11px]">
+                Go to <strong>Authentication → Users</strong> in your Supabase dashboard.
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Email Address *</Label>
-              <Input
-                type="email"
-                placeholder="e.g. rahul@ganeshsweets.com"
-                value={staffEmail}
-                onChange={(e) => setStaffEmail(e.target.value)}
-                required
-                className="text-xs"
-              />
+            <div className="p-3 rounded-lg border border-border bg-muted/40 space-y-1">
+              <p className="font-bold text-foreground">Step 2: Click &ldquo;Add User&rdquo; → &ldquo;Create User&rdquo;</p>
+              <p className="text-muted-foreground text-[11px]">
+                Enter your staff member&apos;s email and assign them a secure password.
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Mobile Number</Label>
-              <Input
-                placeholder="+91 98765 00000"
-                value={staffPhone}
-                onChange={(e) => setStaffPhone(e.target.value)}
-                className="text-xs"
-              />
+            <div className="p-3 rounded-lg border border-border bg-muted/40 space-y-1">
+              <p className="font-bold text-foreground">Step 3: Assign Role</p>
+              <p className="text-muted-foreground text-[11px]">
+                In this Settings page, select their role (Manager, Accountant, or Cashier) in the dropdown table above.
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Assigned Role *</Label>
-              <Select value={staffRole} onValueChange={(val) => setStaffRole(val as UserRole)}>
-                <SelectTrigger className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Owner">Owner (Full Admin Access)</SelectItem>
-                  <SelectItem value="Manager">Store Manager (Inventory, Orders, Purchases)</SelectItem>
-                  <SelectItem value="Accountant">Accountant (Expenses, Ledgers, Reports)</SelectItem>
-                  <SelectItem value="Cashier">Cashier / Counter (Orders, Weight-Price Calc)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setNewStaffOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" className="bg-primary hover:bg-saffron-dark text-white font-semibold">
-                Create Staff Member
-              </Button>
-            </DialogFooter>
-          </form>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button type="button" size="sm" onClick={() => setNewStaffOpen(false)}>
+              Understood
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

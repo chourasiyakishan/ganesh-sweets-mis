@@ -22,7 +22,6 @@ import {
   X,
   Layers,
   LogOut,
-  Sparkles,
   UserCheck,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -46,7 +45,6 @@ import {
 import { useRouter } from "next/navigation"
 import { formatINR } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth-context"
-import { isDemoMode } from "@/lib/data-management"
 import {
   initialItems,
   initialCategories,
@@ -69,11 +67,10 @@ export function Topbar() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [theme, setTheme] = useState<"light" | "dark" | "system">("light")
-  const [demoActive, setDemoActive] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
-  const { user, users, switchUser, logout } = useAuth()
+  const { user, logout } = useAuth()
 
   // Handle click outside to close user menu
   useEffect(() => {
@@ -89,20 +86,6 @@ export function Topbar() {
       document.removeEventListener("mousedown", handleClickOutside)
     }
   }, [userMenuOpen])
-
-  // Listen to Demo Mode status
-  useEffect(() => {
-    setDemoActive(isDemoMode())
-    const handleDemo = () => setDemoActive(isDemoMode())
-    window.addEventListener("demo-mode-changed", handleDemo)
-    window.addEventListener("data-cleared", handleDemo)
-    window.addEventListener("data-restored", handleDemo)
-    return () => {
-      window.removeEventListener("demo-mode-changed", handleDemo)
-      window.removeEventListener("data-cleared", handleDemo)
-      window.removeEventListener("data-restored", handleDemo)
-    }
-  }, [])
 
   // User initials
   const userInitials = useMemo(() => {
@@ -421,27 +404,6 @@ export function Topbar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Demo Mode / Live Mode Indicator */}
-          {demoActive ? (
-            <Badge
-              variant="outline"
-              onClick={() => router.push("/settings")}
-              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
-              title="Click to turn Demo Mode OFF and use Live Real Data"
-            >
-              <Sparkles className="h-3 w-3" /> Demo Mode
-            </Badge>
-          ) : (
-            <Badge
-              variant="outline"
-              onClick={() => router.push("/settings")}
-              className="hidden md:inline-flex items-center gap-1.5 cursor-pointer bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 text-[11px] font-semibold py-1 px-2.5 transition-colors"
-              title="Live Business Database Active"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Mode
-            </Badge>
-          )}
-
           {/* Notifications */}
           <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-foreground relative">
             <Bell className="h-4 w-4" />
@@ -450,7 +412,7 @@ export function Topbar() {
 
           <div className="h-6 w-[1px] bg-border hidden sm:block" />
 
-          {/* Active User Menu & Role Switcher (Fail-safe Custom Dropdown) */}
+          {/* Active User Menu (Fail-safe Custom Dropdown) */}
           <div className="relative" ref={userMenuRef}>
             <button
               type="button"
@@ -473,42 +435,14 @@ export function Topbar() {
             {userMenuOpen && (
               <div className="absolute right-0 top-full mt-2 w-64 bg-card rounded-xl border border-border shadow-elevated z-50 p-2 animate-in fade-in-0 zoom-in-95 duration-150">
                 <div className="p-2 border-b border-border mb-1">
-                  <p className="text-xs font-bold text-foreground leading-none">{user?.name || "Kishan (Owner)"}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1 truncate">{user?.email || "admin@ganeshsweets.com"}</p>
+                  <p className="text-xs font-bold text-foreground leading-none">{user?.name || "User"}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1 truncate">{user?.email}</p>
                   <div className="pt-2">
                     <Badge variant="secondary" className="text-[10px] font-semibold text-primary">
                       Role: {user?.role || "Owner"}
                     </Badge>
                   </div>
                 </div>
-
-                {users.length > 1 && (
-                  <div className="py-1 border-b border-border mb-1">
-                    <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Switch Active Role
-                    </p>
-                    {users.map((u) => (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() => {
-                          switchUser(u.id)
-                          setUserMenuOpen(false)
-                        }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors text-left ${
-                          user?.id === u.id
-                            ? "bg-primary/10 text-primary font-bold"
-                            : "text-foreground hover:bg-accent"
-                        }`}
-                      >
-                        <span className="truncate">{u.name}</span>
-                        <Badge variant="outline" className="text-[9px] ml-1.5 shrink-0">
-                          {u.role}
-                        </Badge>
-                      </button>
-                    ))}
-                  </div>
-                )}
 
                 <div className="py-1 space-y-0.5">
                   {(!user || user.role === "Owner") && (
@@ -521,7 +455,7 @@ export function Topbar() {
                       className="w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-foreground hover:bg-accent cursor-pointer transition-colors text-left"
                     >
                       <SettingsIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                      Settings & Data Management
+                      Settings
                     </button>
                   )}
 
