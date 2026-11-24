@@ -438,26 +438,24 @@ export function Topbar() {
                   <p className="text-xs font-bold text-foreground leading-none">{user?.name || "User"}</p>
                   <p className="text-[11px] text-muted-foreground mt-1 truncate">{user?.email}</p>
                   <div className="pt-2">
-                    <Badge variant="secondary" className="text-[10px] font-semibold text-primary">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600 dark:bg-emerald-700 text-white shadow-xs">
                       Role: {user?.role || "Owner"}
-                    </Badge>
+                    </span>
                   </div>
                 </div>
 
                 <div className="py-1 space-y-0.5">
-                  {(!user || user.role === "Owner") && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserMenuOpen(false)
-                        router.push("/settings")
-                      }}
-                      className="w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-foreground hover:bg-accent cursor-pointer transition-colors text-left"
-                    >
-                      <SettingsIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                      Settings
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      router.push("/settings")
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-foreground hover:bg-accent cursor-pointer transition-colors text-left"
+                  >
+                    <SettingsIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                    Settings
+                  </button>
 
                   <button
                     type="button"

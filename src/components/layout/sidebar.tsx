@@ -161,27 +161,25 @@ function NavContent({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         </nav>
       </div>
 
-      {/* Settings (visible to Owner, fixed at bottom) */}
-      {(!user || user.role === "Owner") && (
-        <div className="border-t border-border px-3 py-3 shrink-0 bg-card">
-          <Link
-            href="/settings"
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150",
-              "hover:bg-accent hover:text-accent-foreground",
-              pathname.startsWith("/settings")
-                ? "bg-deep-green-container text-deep-green font-semibold"
-                : "text-foreground/80",
-              collapsed && "justify-center px-2"
-            )}
-            title={collapsed ? "Settings" : undefined}
-          >
-            <Settings className="h-5 w-5 shrink-0 text-muted-foreground" />
-            {!collapsed && <span className="text-sm font-medium">Settings</span>}
-          </Link>
-        </div>
-      )}
+      {/* Settings (fixed at bottom for all users to manage their profile & username) */}
+      <div className="border-t border-border px-3 py-3 shrink-0 bg-card">
+        <Link
+          href="/settings"
+          onClick={onNavigate}
+          className={cn(
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150",
+            "hover:bg-accent hover:text-accent-foreground",
+            pathname.startsWith("/settings")
+              ? "bg-deep-green-container text-deep-green font-semibold"
+              : "text-foreground/80",
+            collapsed && "justify-center px-2"
+          )}
+          title={collapsed ? "Settings" : undefined}
+        >
+          <Settings className="h-5 w-5 shrink-0 text-muted-foreground" />
+          {!collapsed && <span className="text-sm font-medium">Settings</span>}
+        </Link>
+      </div>
     </div>
   )
 }

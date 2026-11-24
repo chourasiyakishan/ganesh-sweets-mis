@@ -21,11 +21,26 @@ interface AuthContextType {
   login: (email: string, password?: string) => Promise<boolean>
   logout: () => Promise<void>
   canAccess: (allowedRoles: UserRole[]) => boolean
+  updateUsername: (newName: string) => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const ACTIVE_USER_STORAGE_KEY = "ganesh_sweets_active_user"
+
+const getCustomStoredUsername = (id?: string, email?: string): string | null => {
+  try {
+    if (id) {
+      const byId = localStorage.getItem(`ganesh_sweets_username_${id}`)
+      if (byId && byId.trim()) return byId.trim()
+    }
+    if (email) {
+      const byEmail = localStorage.getItem(`ganesh_sweets_username_${email.toLowerCase().trim()}`)
+      if (byEmail && byEmail.trim()) return byEmail.trim()
+    }
+  } catch {}
+  return null
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null)
@@ -52,9 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 ? ((profile.role.charAt(0).toUpperCase() + profile.role.slice(1)) as UserRole)
                 : "Owner"
 
+              const customName = getCustomStoredUsername(session.user.id, session.user.email || "")
+
               const sbUser: UserProfile = {
                 id: session.user.id,
-                name: profile?.full_name || session.user.email?.split("@")[0] || "User",
+                name: customName || profile?.full_name || session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "User",
                 email: session.user.email || profile?.email || "",
                 role: roleName,
                 status: profile?.status || "ACTIVE",
@@ -80,6 +97,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (storedActive) {
           try {
             const parsedActive = JSON.parse(storedActive)
+            const customName = getCustomStoredUsername(parsedActive.id, parsedActive.email)
+            if (customName) {
+              parsedActive.name = customName
+            }
             setUser(parsedActive)
           } catch {
             setUser(null)
@@ -159,9 +180,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn("Profile fetch error:", profileErr)
         }
 
+        const customStoredName = getCustomStoredUsername(data.user.id, trimmedEmail)
+
         const authenticatedUser: UserProfile = {
           id: data.user.id,
-          name: fullName,
+          name: customStoredName || fullName,
           email: data.user.email || trimmedEmail,
           role: roleName,
           status: "ACTIVE",
@@ -181,9 +204,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (trimmedEmail === "admin@ganeshsweets.com" || trimmedEmail === "kishan710@gmail.com") &&
       (trimmedPassword === "Ganesh@2026" || trimmedPassword === "demo123" || trimmedPassword === "admin123")
     ) {
+      const customStoredName = getCustomStoredUsername("offline_owner", trimmedEmail)
       const offlineOwner: UserProfile = {
         id: "offline_owner",
-        name: trimmedEmail === "kishan710@gmail.com" ? "Kishan (Owner)" : "Admin User",
+        name: customStoredName || (trimmedEmail === "kishan710@gmail.com" ? "Kishan (Owner)" : "Admin User"),
         email: trimmedEmail,
         role: "Owner",
         status: "ACTIVE",
@@ -195,6 +219,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Unmatched credentials strictly rejected!
     return false
+  }
+
+  const updateUsername = async (newName: string): Promise<boolean> => {
+    const trimmed = newName.trim()
+    if (!trimmed || !user) return false
+
+    const updatedUser: UserProfile = {
+      ...user,
+      name: trimmed,
+    }
+
+    setUser(updatedUser)
+
+    try {
+      localStorage.setItem(ACTIVE_USER_STORAGE_KEY, JSON.stringify(updatedUser))
+      localStorage.setItem(`ganesh_sweets_username_${user.id}`, trimmed)
+      if (user.email) {
+        localStorage.setItem(`ganesh_sweets_username_${user.email.toLowerCase().trim()}`, trimmed)
+      }
+    } catch (e) {
+      console.warn("Error caching custom username:", e)
+    }
+
+    // Live sync to Supabase if connected
+    if (isSupabaseConfigured() && user.id && user.id !== "offline_owner") {
+      try {
+        const supabase = createClient()
+        await supabase.from("profiles").update({ full_name: trimmed }).eq("id", user.id)
+        await supabase.auth.updateUser({ data: { full_name: trimmed } })
+      } catch (err) {
+        console.warn("Supabase username sync warning:", err)
+      }
+    }
+
+    return true
   }
 
   const logout = async () => {
@@ -225,6 +284,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         canAccess,
+        updateUsername,
       }}
     >
       {children}

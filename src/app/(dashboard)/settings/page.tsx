@@ -47,7 +47,18 @@ interface StaffProfile {
 }
 
 export default function SettingsPage() {
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, updateUsername } = useAuth()
+  const isOwner = !currentUser || currentUser.role === "Owner"
+
+  // User Profile state
+  const [customUsername, setCustomUsername] = useState(currentUser?.name || "")
+  const [savingUsername, setSavingUsername] = useState(false)
+
+  useEffect(() => {
+    if (currentUser?.name) {
+      setCustomUsername(currentUser.name)
+    }
+  }, [currentUser?.name])
 
   // Business info state
   const [businessName, setBusinessName] = useState("Ganesh Sweets & Namkeen")
@@ -113,20 +124,27 @@ export default function SettingsPage() {
     loadStaffUsers()
   }, [currentUser])
 
-  // Access control: only Owner can access Settings
-  if (currentUser && currentUser.role !== "Owner") {
-    return (
-      <div className="bg-card p-10 rounded-xl border border-border shadow-card text-center space-y-4 max-w-lg mx-auto mt-12">
-        <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto">
-          <Shield className="h-6 w-6" />
-        </div>
-        <h2 className="text-lg font-bold text-foreground">Access Restricted</h2>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Business settings and role administration are exclusively accessible to the Business Owner. Your current account role is{" "}
-          <strong className="text-foreground">{currentUser.role}</strong>.
-        </p>
-      </div>
-    )
+  const handleSaveUsername = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!customUsername.trim()) {
+      toast.error("Please enter a valid display name")
+      return
+    }
+
+    setSavingUsername(true)
+    try {
+      const success = await updateUsername(customUsername.trim())
+      if (success) {
+        toast.success("Profile username updated successfully!")
+        loadStaffUsers()
+      } else {
+        toast.error("Failed to update username")
+      }
+    } catch {
+      toast.error("An error occurred while updating username")
+    } finally {
+      setSavingUsername(false)
+    }
   }
 
   const handleSaveBusiness = (e: React.FormEvent) => {
@@ -262,6 +280,19 @@ create table if not exists orders (
     setTimeout(() => setCopiedSql(false), 3000)
   }
 
+  const OwnerRestrictedCard = ({ title }: { title: string }) => (
+    <div className="bg-card p-10 rounded-xl border border-border shadow-card text-center space-y-4 max-w-lg mx-auto my-6">
+      <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto">
+        <Shield className="h-6 w-6" />
+      </div>
+      <h2 className="text-base font-bold text-foreground">{title} — Owner Access Only</h2>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        This administration section is reserved for the Business Owner. Your active access role is{" "}
+        <strong className="text-foreground">{currentUser?.role || "Staff"}</strong>. You can customize your display name in the <strong>My Profile</strong> tab.
+      </p>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -271,12 +302,15 @@ create table if not exists orders (
           Settings
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Business information, staff role permissions (RBAC) & cloud database connections
+          Profile personalization, business details, staff role permissions (RBAC) & cloud database connections
         </p>
       </div>
 
-      <Tabs defaultValue="business" className="w-full">
-        <TabsList className="grid w-full sm:w-auto grid-cols-3 bg-muted/60 p-1">
+      <Tabs defaultValue="account" className="w-full">
+        <TabsList className="grid w-full sm:w-auto grid-cols-2 sm:grid-cols-4 bg-muted/60 p-1">
+          <TabsTrigger value="account" className="text-xs font-semibold">
+            <User className="h-4 w-4 mr-2 text-primary" /> My Profile
+          </TabsTrigger>
           <TabsTrigger value="business" className="text-xs font-semibold">
             <Building2 className="h-4 w-4 mr-2 text-primary" /> Business Profile
           </TabsTrigger>
@@ -288,8 +322,93 @@ create table if not exists orders (
           </TabsTrigger>
         </TabsList>
 
-        {/* Tab 1: Business Profile */}
+        {/* Tab 1: My Profile & Custom Username (Accessible to all users) */}
+        <TabsContent value="account" className="mt-6 space-y-6">
+          <Card className="border border-border shadow-card max-w-xl">
+            <CardHeader className="bg-muted/30 border-b border-border">
+              <CardTitle className="text-title font-bold text-foreground flex items-center gap-2">
+                <User className="h-5 w-5 text-primary" />
+                My Profile & Custom Username
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Set your personalized display name. This name will appear near the top-right profile icon across the application.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6">
+              <form onSubmit={handleSaveUsername} className="space-y-4">
+                {/* Live Avatar & Info Preview */}
+                <div className="flex items-center gap-3.5 p-3.5 rounded-xl bg-muted/30 border border-border">
+                  <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm shadow-xs shrink-0">
+                    {customUsername.trim().slice(0, 2).toUpperCase() || "GS"}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-foreground leading-tight truncate">
+                      {customUsername.trim() || "Your Name"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                      {currentUser?.email || "user@ganeshsweets.com"}
+                    </p>
+                    <div className="mt-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600 dark:bg-emerald-700 text-white shadow-xs">
+                        Role: {currentUser?.role || "Owner"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Custom Username / Display Name *</Label>
+                  <Input
+                    value={customUsername}
+                    onChange={(e) => setCustomUsername(e.target.value)}
+                    placeholder="Enter your name (e.g. Kishan Chourasiya)"
+                    required
+                    className="text-xs h-9"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    This name will show at the top next to your profile avatar, with your access level displayed below it.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-1">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Registered Email</Label>
+                    <Input
+                      value={currentUser?.email || ""}
+                      disabled
+                      className="text-xs h-9 bg-muted/50 cursor-not-allowed text-muted-foreground"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Access Level</Label>
+                    <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted/50 text-xs font-semibold">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600 dark:bg-emerald-700 text-white shadow-xs">
+                        Role: {currentUser?.role || "Owner"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3">
+                  <Button
+                    type="submit"
+                    disabled={savingUsername || !customUsername.trim()}
+                    className="bg-primary hover:bg-saffron-dark text-white font-semibold text-xs"
+                  >
+                    <Save className="h-4 w-4 mr-1.5" />
+                    {savingUsername ? "Saving..." : "Save Username"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab 2: Business Profile */}
         <TabsContent value="business" className="mt-6 space-y-6">
+          {!isOwner ? (
+            <OwnerRestrictedCard title="Business Profile" />
+          ) : (
           <Card className="border border-border shadow-card max-w-2xl">
             <CardHeader className="bg-muted/30 border-b border-border">
               <CardTitle className="text-title font-bold text-foreground">Business Information</CardTitle>
@@ -328,120 +447,130 @@ create table if not exists orders (
               </form>
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
-        {/* Tab 2: Users & Roles (RBAC) */}
+        {/* Tab 3: Users & Roles (RBAC) */}
         <TabsContent value="users" className="mt-6 space-y-6">
-          <Card className="border border-border shadow-card">
-            <CardHeader className="bg-muted/30 border-b border-border flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-title font-bold text-foreground">
-                  User Roles & Permissions (RBAC)
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Assign roles to team members. Each staff member logs in securely with their own email and password.
-                </CardDescription>
-              </div>
-              <Button
-                onClick={() => setNewStaffOpen(true)}
-                className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold"
-              >
-                <Plus className="h-4 w-4 mr-1.5" /> How to Add Staff
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-table-header text-table-header-text">
-                  <tr>
-                    <th className="p-3">Staff Name</th>
-                    <th className="p-3">Email Address</th>
-                    <th className="p-3">Assigned Role</th>
-                    <th className="p-3 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {staffUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-muted/40">
-                      <td className="p-3 font-bold text-foreground">
-                        {u.name}
-                        {u.email === currentUser?.email && (
-                          <span className="ml-2 text-[10px] text-primary font-semibold">(You)</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{u.email}</td>
-                      <td className="p-3">
-                        <Select
-                          value={u.role}
-                          onValueChange={(role) => role && handleRoleChange(u.id, role)}
-                          disabled={u.email === currentUser?.email}
-                        >
-                          <SelectTrigger className="w-40 h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Owner">Owner (Superadmin)</SelectItem>
-                            <SelectItem value="Manager">Store Manager</SelectItem>
-                            <SelectItem value="Accountant">Accountant</SelectItem>
-                            <SelectItem value="Cashier">Cashier / Counter</SelectItem>
-                            <SelectItem value="Staff">Staff</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="p-3 text-center">
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px]">
-                          {u.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
+          {!isOwner ? (
+            <OwnerRestrictedCard title="User Roles & RBAC" />
+          ) : (
+            <>
+              <Card className="border border-border shadow-card">
+                <CardHeader className="bg-muted/30 border-b border-border flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-title font-bold text-foreground">
+                      User Roles & Permissions (RBAC)
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Assign roles to team members. Each staff member logs in securely with their own email and password.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    onClick={() => setNewStaffOpen(true)}
+                    className="bg-primary hover:bg-saffron-dark text-white text-xs font-semibold"
+                  >
+                    <Plus className="h-4 w-4 mr-1.5" /> How to Add Staff
+                  </Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-table-header text-table-header-text">
+                      <tr>
+                        <th className="p-3">Staff Name</th>
+                        <th className="p-3">Email Address</th>
+                        <th className="p-3">Assigned Role</th>
+                        <th className="p-3 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {staffUsers.map((u) => (
+                        <tr key={u.id} className="hover:bg-muted/40">
+                          <td className="p-3 font-bold text-foreground">
+                            {u.name}
+                            {u.email === currentUser?.email && (
+                              <span className="ml-2 text-[10px] text-primary font-semibold">(You)</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-muted-foreground">{u.email}</td>
+                          <td className="p-3">
+                            <Select
+                              value={u.role}
+                              onValueChange={(role) => role && handleRoleChange(u.id, role)}
+                              disabled={u.email === currentUser?.email}
+                            >
+                              <SelectTrigger className="w-40 h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Owner">Owner (Superadmin)</SelectItem>
+                                <SelectItem value="Manager">Store Manager</SelectItem>
+                                <SelectItem value="Accountant">Accountant</SelectItem>
+                                <SelectItem value="Cashier">Cashier / Counter</SelectItem>
+                                <SelectItem value="Staff">Staff</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Badge className="bg-emerald-600 dark:bg-emerald-700 text-white text-[10px] font-semibold">
+                              {u.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
 
-          {/* Role Permissions Matrix Card */}
-          <Card className="border border-border shadow-card">
-            <CardHeader className="bg-muted/30 border-b border-border">
-              <CardTitle className="text-title font-bold text-foreground text-sm">
-                Role Permissions Breakdown
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-saffron">Owner (Superadmin)</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Full access to all operations, business settings, financial P&L, reports, and role administration.
-                  </p>
-                </div>
+              {/* Role Permissions Matrix Card */}
+              <Card className="border border-border shadow-card">
+                <CardHeader className="bg-muted/30 border-b border-border">
+                  <CardTitle className="text-title font-bold text-foreground text-sm">
+                    Role Permissions Breakdown
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                    <div className="p-3 rounded-lg border border-border bg-card">
+                      <h4 className="font-bold text-saffron">Owner (Superadmin)</h4>
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        Full access to all operations, business settings, financial P&L, reports, and role administration.
+                      </p>
+                    </div>
 
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-deep-green">Store Manager</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Manages inventory items, suppliers, purchases, recipes, and customer orders. Cannot access Settings.
-                  </p>
-                </div>
+                    <div className="p-3 rounded-lg border border-border bg-card">
+                      <h4 className="font-bold text-deep-green">Store Manager</h4>
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        Manages inventory items, suppliers, purchases, recipes, and customer orders. Cannot access Settings.
+                      </p>
+                    </div>
 
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-amber-600">Accountant</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Access to daily purchases ledger, expenses tracking, vendor balances, and Excel reports.
-                  </p>
-                </div>
+                    <div className="p-3 rounded-lg border border-border bg-card">
+                      <h4 className="font-bold text-amber-600">Accountant</h4>
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        Access to daily purchases ledger, expenses tracking, vendor balances, and Excel reports.
+                      </p>
+                    </div>
 
-                <div className="p-3 rounded-lg border border-border bg-card">
-                  <h4 className="font-bold text-blue-600">Cashier / Counter</h4>
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    Fast booking of counter sweet orders, customer phone numbers, item price lookup, and weight-price calculator.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                    <div className="p-3 rounded-lg border border-border bg-card">
+                      <h4 className="font-bold text-blue-600">Cashier / Counter</h4>
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        Fast booking of counter sweet orders, customer phone numbers, item price lookup, and weight-price calculator.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
 
-        {/* Tab 3: Cloud Database (Supabase) */}
+        {/* Tab 4: Cloud Database (Supabase) */}
         <TabsContent value="database" className="mt-6 space-y-6">
+          {!isOwner ? (
+            <OwnerRestrictedCard title="Cloud Database" />
+          ) : (
           <div className="grid md:grid-cols-2 gap-6">
             <Card className="border border-border shadow-card">
               <CardHeader className="bg-muted/30 border-b border-border">
@@ -522,6 +651,7 @@ create table if not exists orders (
               </CardContent>
             </Card>
           </div>
+          )}
         </TabsContent>
       </Tabs>
 
