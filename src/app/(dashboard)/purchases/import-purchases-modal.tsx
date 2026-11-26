@@ -12,14 +12,11 @@ import {
   Upload,
   FileSpreadsheet,
   Download,
-  CheckCircle2,
-  AlertCircle,
   AlertTriangle,
   Trash2,
   Merge,
   Plus,
   Ban,
-  HelpCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -60,25 +57,66 @@ interface ImportPurchasesModalProps {
   existingPurchases?: PurchaseEntry[]
 }
 
-// Helper: Convert varied date inputs (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, Excel serial) to YYYY-MM-DD
+const MONTH_MAP: Record<string, string> = {
+  jan: "01", january: "01",
+  feb: "02", february: "02",
+  mar: "03", march: "03",
+  apr: "04", april: "04",
+  may: "05",
+  jun: "06", june: "06",
+  jul: "07", july: "07",
+  aug: "08", august: "08",
+  sep: "09", sept: "09", september: "09",
+  oct: "10", october: "10",
+  nov: "11", november: "11",
+  dec: "12", december: "12",
+}
+
+// Universal Date Parser: Understands Excel numeric serials, DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY,
+// DD-MM-YY, YYYY-MM-DD, 15-Mar-2026, Mar 15 2026, timestamps, etc.
 function parseToYYYYMMDD(val: any): string {
   if (val === null || val === undefined || val === "") {
     return new Date().toISOString().split("T")[0]
   }
 
-  // Handle Excel numeric serial dates (e.g. 45366)
-  if (typeof val === "number") {
+  // 1. Native Date instance
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    const y = val.getFullYear()
+    const m = String(val.getMonth() + 1).padStart(2, "0")
+    const d = String(val.getDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+
+  // 2. Excel numeric serial date (e.g. 45366 or "45366")
+  const numVal = Number(val)
+  if (!isNaN(numVal) && numVal > 25000 && numVal < 75000) {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30))
-    const d = new Date(excelEpoch.getTime() + val * 86400000)
+    const d = new Date(excelEpoch.getTime() + numVal * 86400000)
     if (!isNaN(d.getTime())) {
-      return d.toISOString().split("T")[0]
+      const y = d.getUTCFullYear()
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0")
+      const day = String(d.getUTCDate()).padStart(2, "0")
+      return `${y}-${m}-${day}`
     }
   }
 
-  const str = String(val).trim()
+  let str = String(val).trim()
+  if (!str) return new Date().toISOString().split("T")[0]
 
-  // Format: DD-MM-YYYY or DD/MM/YYYY
-  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+  // Strip time component if present (e.g. "15-03-2026 10:30:00" or "2026-03-15T00:00:00.000Z")
+  str = str.replace(/[T ].*$/, "").trim()
+
+  // 3. Format: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const ymdMatch = str.match(/^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$/)
+  if (ymdMatch) {
+    const yyyy = ymdMatch[1]
+    const mm = ymdMatch[2].padStart(2, "0")
+    const dd = ymdMatch[3].padStart(2, "0")
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  // 4. Format: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{4})$/)
   if (dmyMatch) {
     const dd = dmyMatch[1].padStart(2, "0")
     const mm = dmyMatch[2].padStart(2, "0")
@@ -86,15 +124,49 @@ function parseToYYYYMMDD(val: any): string {
     return `${yyyy}-${mm}-${dd}`
   }
 
-  // Format: YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    return str
+  // 5. Format: DD-MM-YY or DD/MM/YY or DD.MM.YY (2-digit year)
+  const dmyShortMatch = str.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2})$/)
+  if (dmyShortMatch) {
+    const dd = dmyShortMatch[1].padStart(2, "0")
+    const mm = dmyShortMatch[2].padStart(2, "0")
+    const yy = parseInt(dmyShortMatch[3], 10)
+    const yyyy = yy < 50 ? `20${dmyShortMatch[3]}` : `19${dmyShortMatch[3]}`
+    return `${yyyy}-${mm}-${dd}`
   }
 
-  // Fallback Date constructor
+  // 6. Textual month format: "15-Mar-2026", "15 Mar 2026", "15-March-2026", "15-Mar-26"
+  const textMonthMatch = str.match(/^(\d{1,2})[-/.\s]+([A-Za-z]+)[-/.\s]+(\d{2,4})$/)
+  if (textMonthMatch) {
+    const dd = textMonthMatch[1].padStart(2, "0")
+    const monthKey = textMonthMatch[2].toLowerCase()
+    const mm = MONTH_MAP[monthKey] || "01"
+    let yyyy = textMonthMatch[3]
+    if (yyyy.length === 2) {
+      yyyy = parseInt(yyyy, 10) < 50 ? `20${yyyy}` : `19${yyyy}`
+    }
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  // 7. Textual format: "Mar 15, 2026" or "March 15, 2026"
+  const monthTextDayMatch = str.match(/^([A-Za-z]+)[-/.\s]+(\d{1,2}),?[-/.\s]+(\d{2,4})$/)
+  if (monthTextDayMatch) {
+    const monthKey = monthTextDayMatch[1].toLowerCase()
+    const mm = MONTH_MAP[monthKey] || "01"
+    const dd = monthTextDayMatch[2].padStart(2, "0")
+    let yyyy = monthTextDayMatch[3]
+    if (yyyy.length === 2) {
+      yyyy = parseInt(yyyy, 10) < 50 ? `20${yyyy}` : `19${yyyy}`
+    }
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  // 8. Fallback to Date constructor
   const d = new Date(str)
   if (!isNaN(d.getTime())) {
-    return d.toISOString().split("T")[0]
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, "0")
+    const day = String(d.getDate()).padStart(2, "0")
+    return `${y}-${m}-${day}`
   }
 
   return new Date().toISOString().split("T")[0]
@@ -123,13 +195,13 @@ export function ImportPurchasesModal({
     onClose()
   }
 
-  // Generate and download sample Excel template
+  // Generate and download sample Excel template with Vendor Name first, then Item Name
   const handleDownloadSample = () => {
     const sampleData = [
       {
         "Date (DD-MM-YYYY)": "15-03-2026",
-        "Item Name": "Pure Cow Ghee",
         "Vendor Name": "Mahi Dairy Farms",
+        "Item Name": "Pure Cow Ghee",
         "Quantity": 50,
         "Unit": "Litre",
         "Price Amount (₹)": 850,
@@ -137,8 +209,8 @@ export function ImportPurchasesModal({
       },
       {
         "Date (DD-MM-YYYY)": "16-03-2026",
-        "Item Name": "Kaju (Cashew W320)",
         "Vendor Name": "Shreeji Dry Fruits",
+        "Item Name": "Kaju (Cashew W320)",
         "Quantity": 25,
         "Unit": "Kg",
         "Price Amount (₹)": 680,
@@ -146,8 +218,8 @@ export function ImportPurchasesModal({
       },
       {
         "Date (DD-MM-YYYY)": "18-03-2026",
-        "Item Name": "Refined Sugar (M-30)",
         "Vendor Name": "Gujarat Sugar Mills",
+        "Item Name": "Refined Sugar (M-30)",
         "Quantity": 100,
         "Unit": "Kg",
         "Price Amount (₹)": 38.5,
@@ -155,8 +227,8 @@ export function ImportPurchasesModal({
       },
       {
         "Date (DD-MM-YYYY)": "20-03-2026",
-        "Item Name": "Cardamom (Elaichi)",
         "Vendor Name": "Kerala Spices Co.",
+        "Item Name": "Cardamom (Elaichi)",
         "Quantity": 1.5,
         "Unit": "Kg",
         "Price Amount (₹)": 2400,
@@ -166,13 +238,13 @@ export function ImportPurchasesModal({
 
     const ws = XLSX.utils.json_to_sheet(sampleData)
     ws["!cols"] = [
-      { wch: 18 },
-      { wch: 25 },
-      { wch: 24 },
-      { wch: 12 },
-      { wch: 10 },
-      { wch: 16 },
-      { wch: 25 },
+      { wch: 18 }, // Date
+      { wch: 24 }, // Vendor Name
+      { wch: 25 }, // Item Name
+      { wch: 12 }, // Quantity
+      { wch: 10 }, // Unit
+      { wch: 16 }, // Price Amount (₹)
+      { wch: 25 }, // Notes
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Purchase_Template")
@@ -204,7 +276,7 @@ export function ImportPurchasesModal({
         return
       }
 
-      // Flexible column key finder
+      // Flexible column key finder: matches case-insensitively with stripped whitespace & symbols
       const findField = (row: any, candidates: string[]): any => {
         const keys = Object.keys(row)
         for (const candidate of candidates) {
@@ -219,13 +291,70 @@ export function ImportPurchasesModal({
       }
 
       const parsed: ParsedPurchaseRow[] = rawRows.map((row, idx) => {
-        const rawDate = findField(row, ["date", "purchasedate", "dateddmmyyyy", "entrydate", "invoicedate"])
-        const rawItem = String(findField(row, ["itemname", "item", "product", "productname", "material"])).trim()
-        const rawVendor = String(findField(row, ["vendorname", "vendor", "supplier", "suppliername"])).trim()
-        const rawQty = parseFloat(String(findField(row, ["quantity", "qty", "amount_qty"])))
-        const rawUnit = String(findField(row, ["unit", "uom"])).trim()
-        const rawPrice = parseFloat(String(findField(row, ["price", "rate", "priceamount", "unitprice", "rateperunit"])))
-        const rawRemarks = String(findField(row, ["notes", "remarks", "comment", "description"])).trim()
+        const rowKeys = Object.keys(row)
+
+        // 1. Date extraction
+        const rawDate = findField(row, [
+          "date",
+          "purchasedate",
+          "dateddmmyyyy",
+          "entrydate",
+          "invoicedate",
+          "billdate",
+          "tarikh",
+          "dateofpurchase",
+        ])
+
+        // 2. Vendor Name extraction (Priority: Vendor Name candidates)
+        let rawVendor = String(
+          findField(row, [
+            "vendorname",
+            "vendor",
+            "supplier",
+            "suppliername",
+            "party",
+            "partyname",
+            "vendorparty",
+            "seller",
+            "dealer",
+          ])
+        ).trim()
+
+        // 3. Item Name extraction (Priority: Item Name candidates)
+        let rawItem = String(
+          findField(row, [
+            "itemname",
+            "item",
+            "product",
+            "productname",
+            "material",
+            "rawmaterial",
+            "itemdescription",
+            "goods",
+            "particulars",
+            "itemparticulars",
+          ])
+        ).trim()
+
+        // Positional Fallback: If headers are unnamed (e.g. __EMPTY) or unusual:
+        // Position 0 = Date, Position 1 = Vendor Name, Position 2 = Item Name
+        if (!rawVendor && rowKeys.length > 1) {
+          const candidateVal = String(row[rowKeys[1]]).trim()
+          if (candidateVal && isNaN(Number(candidateVal))) {
+            rawVendor = candidateVal
+          }
+        }
+        if (!rawItem && rowKeys.length > 2) {
+          const candidateVal = String(row[rowKeys[2]]).trim()
+          if (candidateVal && isNaN(Number(candidateVal))) {
+            rawItem = candidateVal
+          }
+        }
+
+        const rawQty = parseFloat(String(findField(row, ["quantity", "qty", "amountqty", "volume", "weight", "matra"])))
+        const rawUnit = String(findField(row, ["unit", "uom", "unitofmeasure", "measuringunit"])).trim()
+        const rawPrice = parseFloat(String(findField(row, ["price", "rate", "priceamount", "unitprice", "rateperunit", "bhaav", "cost", "amount"])))
+        const rawRemarks = String(findField(row, ["notes", "remarks", "comment", "description", "details", "quality"])).trim()
 
         const dateStr = parseToYYYYMMDD(rawDate)
 
@@ -459,7 +588,7 @@ export function ImportPurchasesModal({
             </Button>
           </div>
           <DialogDescription className="text-xs">
-            Upload an Excel (.xlsx, .xls) or CSV (.csv) file. Intelligent conflict detection will identify any existing purchases on the same date.
+            Upload an Excel (.xlsx, .xls) or CSV (.csv) file. Supports any date format (DD-MM-YYYY, YYYY-MM-DD, 15-Mar-2026, etc.).
           </DialogDescription>
         </DialogHeader>
 
@@ -490,7 +619,7 @@ export function ImportPurchasesModal({
                   Click to browse or drag & drop Excel / CSV file
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Supports .xlsx, .xls, and .csv files. Columns: Date, Item Name, Vendor, Quantity, Unit, Price Amount.
+                  Columns: <strong>Date</strong>, <strong>Vendor Name</strong>, <strong>Item Name</strong>, <strong>Quantity</strong>, <strong>Unit</strong>, <strong>Price Amount</strong>.
                 </p>
               </div>
               <Button type="button" variant="secondary" size="sm" className="mt-1 text-xs font-semibold">
@@ -604,15 +733,15 @@ export function ImportPurchasesModal({
               </div>
             )}
 
-            {/* Preview Table */}
+            {/* Preview Table with Vendor Name first, then Item Name */}
             <div className="border border-border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
               <Table>
                 <TableHeader className="bg-table-header sticky top-0 z-10">
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="text-xs font-semibold text-left">Action / Status</TableHead>
                     <TableHead className="text-xs font-semibold text-left">Date</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Item Name</TableHead>
                     <TableHead className="text-xs font-semibold text-left">Vendor Name</TableHead>
+                    <TableHead className="text-xs font-semibold text-left">Item Name</TableHead>
                     <TableHead className="text-xs font-semibold text-left">Quantity</TableHead>
                     <TableHead className="text-xs font-semibold text-left">Unit</TableHead>
                     <TableHead className="text-xs font-semibold text-left">Rate (₹)</TableHead>
@@ -686,6 +815,9 @@ export function ImportPurchasesModal({
                       <TableCell className="text-xs text-left font-medium">
                         {formatDateDDMMYYYY(row.purchaseDate)}
                       </TableCell>
+                      <TableCell className="text-xs font-semibold text-foreground text-left">
+                        {row.vendorName}
+                      </TableCell>
                       <TableCell className="text-xs font-bold text-foreground text-left">
                         <div>
                           <span>{row.itemName}</span>
@@ -695,9 +827,6 @@ export function ImportPurchasesModal({
                             </p>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground text-left">
-                        {row.vendorName}
                       </TableCell>
                       <TableCell className="text-xs font-semibold text-foreground text-left">
                         {row.quantity}

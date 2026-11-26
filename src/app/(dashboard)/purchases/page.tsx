@@ -832,8 +832,8 @@ export default function PurchasesPage() {
 
     const exportData = filteredAndSortedPurchases.map((p) => ({
       "Date (DD-MM-YYYY)": formatDateDDMMYYYY(p.purchaseDate),
-      "Item Name": p.itemName,
       "Vendor Name": p.vendorName,
+      "Item Name": p.itemName,
       "Quantity": p.quantity,
       "Unit": p.unit,
       "Price Amount (₹)": p.rate,
@@ -844,8 +844,8 @@ export default function PurchasesPage() {
     const ws = XLSX.utils.json_to_sheet(exportData)
     ws["!cols"] = [
       { wch: 18 },
-      { wch: 25 },
       { wch: 24 },
+      { wch: 25 },
       { wch: 12 },
       { wch: 10 },
       { wch: 16 },
