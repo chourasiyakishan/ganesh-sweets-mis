@@ -31,8 +31,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
-import { initialPurchases, initialItems, initialVendors, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
-import { fetchPurchases } from "@/lib/supabase/data-service"
+import { initialPurchases, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
+import { ITEMS_STORAGE_KEY, VENDORS_STORAGE_KEY } from "@/lib/data-management"
+import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
@@ -75,9 +76,20 @@ function getFinancialYear(dateStr: string): string {
 }
 
 export default function PurchasesPage() {
-  const [purchases, setPurchases] = useState<PurchaseEntry[]>(initialPurchases)
-  const [items] = useState<Item[]>(initialItems)
-  const [vendors] = useState<Vendor[]>(initialVendors)
+  const [purchases, setPurchases] = useState<PurchaseEntry[]>([])
+  const [items, setItems] = useState<Item[]>([])
+  const [vendors, setVendors] = useState<Vendor[]>([])
+
+  // Load active Items and Vendors from storage and Supabase
+  const loadItemsAndVendors = async () => {
+    try {
+      const [dbItems, dbVendors] = await Promise.all([fetchItems(), fetchVendors()])
+      setItems(dbItems)
+      setVendors(dbVendors)
+    } catch (e) {
+      console.error("Failed to load items/vendors in purchases:", e)
+    }
+  }
 
   // Load persisted purchases on mount
   const loadPurchasesFromStorage = () => {
@@ -99,6 +111,7 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     loadPurchasesFromStorage()
+    loadItemsAndVendors()
     // Also try fetching from Supabase if configured
     fetchPurchases().then((data) => {
       if (data && data.length > 0) {
@@ -121,11 +134,15 @@ export default function PurchasesPage() {
   // Cross-tab, clear-data, and cross-component sync listener
   useEffect(() => {
     window.addEventListener("purchases-updated", loadPurchasesFromStorage)
+    window.addEventListener("items-updated", loadItemsAndVendors)
+    window.addEventListener("vendors-updated", loadItemsAndVendors)
     window.addEventListener("data-cleared", loadPurchasesFromStorage)
     window.addEventListener("data-restored", loadPurchasesFromStorage)
     window.addEventListener("storage", loadPurchasesFromStorage)
     return () => {
       window.removeEventListener("purchases-updated", loadPurchasesFromStorage)
+      window.removeEventListener("items-updated", loadItemsAndVendors)
+      window.removeEventListener("vendors-updated", loadItemsAndVendors)
       window.removeEventListener("data-cleared", loadPurchasesFromStorage)
       window.removeEventListener("data-restored", loadPurchasesFromStorage)
       window.removeEventListener("storage", loadPurchasesFromStorage)
@@ -871,10 +888,116 @@ export default function PurchasesPage() {
     updatePurchases(nextPurchases)
     setSelectedFY("ALL")
 
+    // --- Automatic Sync with Item Master and Vendor Master ---
+    const updatedItems = [...items]
+    let newItemsAdded = 0
+    const updatedVendors = [...vendors]
+    let newVendorsAdded = 0
+
+    newEntries.forEach((entry) => {
+      const cleanItemName = entry.itemName.trim()
+      const cleanVendorName = entry.vendorName.trim()
+
+      if (!cleanItemName) return
+
+      // 1. Item Master check (case-insensitive name match)
+      const existingItemIndex = updatedItems.findIndex(
+        (it) => it.name.trim().toLowerCase() === cleanItemName.toLowerCase()
+      )
+
+      if (existingItemIndex === -1) {
+        // Brand new Item -> Add to Item Master without duplicate
+        const newItem: Item = {
+          id: `it-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          name: cleanItemName,
+          category: "Raw Materials",
+          currentPrice: entry.rate || 0,
+          unit: entry.unit || "Kg",
+          status: "ACTIVE",
+          vendorNames: cleanVendorName && cleanVendorName.toLowerCase() !== "general supplier" ? [cleanVendorName] : [],
+          notes: "Auto-registered from Excel purchase import",
+        }
+        updatedItems.push(newItem)
+        saveItemToDb(newItem)
+        newItemsAdded++
+      } else {
+        // Item already exists -> Do NOT create duplicate
+        if (cleanVendorName && cleanVendorName.toLowerCase() !== "general supplier") {
+          const itm = updatedItems[existingItemIndex]
+          const vList = itm.vendorNames || []
+          if (!vList.some((vn) => vn.toLowerCase() === cleanVendorName.toLowerCase())) {
+            updatedItems[existingItemIndex] = {
+              ...itm,
+              vendorNames: [...vList, cleanVendorName],
+            }
+            saveItemToDb(updatedItems[existingItemIndex])
+          }
+        }
+      }
+
+      // 2. Vendor Master check (case-insensitive name match)
+      if (cleanVendorName && cleanVendorName.toLowerCase() !== "general supplier") {
+        const existingVendorIndex = updatedVendors.findIndex(
+          (v) => v.name.trim().toLowerCase() === cleanVendorName.toLowerCase()
+        )
+
+        if (existingVendorIndex === -1) {
+          // Brand new Vendor -> Add to Vendor Master without duplicate
+          const newCodeNum = updatedVendors.length + 1
+          const newVendor: Vendor = {
+            id: `v-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            name: cleanVendorName,
+            code: `V-${String(newCodeNum).padStart(3, "0")}`,
+            materials: [cleanItemName],
+            contacts: [],
+            gstin: "",
+            address: "",
+            status: "ACTIVE",
+          }
+          updatedVendors.push(newVendor)
+          saveVendorToDb(newVendor)
+          newVendorsAdded++
+        } else {
+          // Vendor already exists -> Do NOT create duplicate
+          const vnd = updatedVendors[existingVendorIndex]
+          const matList = vnd.materials || []
+          if (!matList.some((m) => m.toLowerCase() === cleanItemName.toLowerCase())) {
+            updatedVendors[existingVendorIndex] = {
+              ...vnd,
+              materials: [...matList, cleanItemName],
+            }
+            saveVendorToDb(updatedVendors[existingVendorIndex])
+          }
+        }
+      }
+    })
+
+    if (newItemsAdded > 0) {
+      setItems(updatedItems)
+      try {
+        localStorage.setItem(ITEMS_STORAGE_KEY, JSON.stringify(updatedItems))
+        window.dispatchEvent(new Event("items-updated"))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
+    if (newVendorsAdded > 0) {
+      setVendors(updatedVendors)
+      try {
+        localStorage.setItem(VENDORS_STORAGE_KEY, JSON.stringify(updatedVendors))
+        window.dispatchEvent(new Event("vendors-updated"))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
     const msgs: string[] = []
-    if (newEntries.length > 0) msgs.push(`${newEntries.length} new entries added`)
-    if (mergedEntries.length > 0) msgs.push(`${mergedEntries.length} entries merged with existing ledger`)
-    toast.success(`Import complete: ${msgs.join(", ") || "No changes"}`)
+    if (newEntries.length > 0) msgs.push(`${newEntries.length} purchases added`)
+    if (mergedEntries.length > 0) msgs.push(`${mergedEntries.length} purchases merged`)
+    if (newItemsAdded > 0) msgs.push(`${newItemsAdded} new items registered in Item Master`)
+    if (newVendorsAdded > 0) msgs.push(`${newVendorsAdded} new vendors registered in Vendor Master`)
+    toast.success(`Import complete: ${msgs.join(" • ") || "No changes"}`)
   }
 
   const renderSortIcon = (field: SortField) => {
