@@ -4,6 +4,7 @@ import {
   Vendor,
   Customer,
   PurchaseEntry,
+  ExpenseEntry,
   Order,
   Recipe,
 } from "@/lib/mockData"
@@ -356,6 +357,69 @@ export async function fetchExpenses(): Promise<any[]> {
   }
 
   return []
+}
+
+export async function saveExpenseToDb(entry: ExpenseEntry): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient()
+      await supabase.from("expenses").upsert({
+        id: entry.id && entry.id.length > 20 ? entry.id : undefined,
+        voucher_number: entry.voucherNumber || "",
+        expense_date: entry.expenseDate || entry.date,
+        month_group: entry.monthGroup || "Active",
+        category: entry.category,
+        title: entry.title,
+        payee: entry.payeeName || "",
+        amount: entry.amount,
+        payment_mode: entry.paymentMode || "Cash",
+        status: entry.status || "PAID",
+        bill_invoice_no: entry.billInvoiceNo || "",
+        description: entry.remarks || "",
+      })
+    } catch (e) {
+      console.warn("Supabase saveExpense error:", e)
+    }
+  }
+}
+
+export async function saveExpensesToDb(entries: ExpenseEntry[]): Promise<void> {
+  if (isSupabaseConfigured() && entries.length > 0) {
+    try {
+      const supabase = createClient()
+      const chunkSize = 100
+      for (let i = 0; i < entries.length; i += chunkSize) {
+        const chunk = entries.slice(i, i + chunkSize).map((entry) => ({
+          id: entry.id && entry.id.length > 20 ? entry.id : undefined,
+          voucher_number: entry.voucherNumber || "",
+          expense_date: entry.expenseDate || entry.date,
+          month_group: entry.monthGroup || "Active",
+          category: entry.category,
+          title: entry.title,
+          payee: entry.payeeName || "",
+          amount: entry.amount,
+          payment_mode: entry.paymentMode || "Cash",
+          status: entry.status || "PAID",
+          bill_invoice_no: entry.billInvoiceNo || "",
+          description: entry.remarks || "",
+        }))
+        await supabase.from("expenses").upsert(chunk)
+      }
+    } catch (e) {
+      console.warn("Supabase saveExpensesToDb error:", e)
+    }
+  }
+}
+
+export async function deleteExpensesFromDb(ids: string[]): Promise<void> {
+  if (isSupabaseConfigured() && ids.length > 0) {
+    try {
+      const supabase = createClient()
+      await supabase.from("expenses").delete().in("id", ids)
+    } catch (e) {
+      console.warn("Supabase deleteExpenses error:", e)
+    }
+  }
 }
 
 // --- RECIPES SERVICE ---

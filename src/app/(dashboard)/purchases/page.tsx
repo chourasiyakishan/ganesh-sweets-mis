@@ -203,9 +203,7 @@ export default function PurchasesPage() {
   const [selectedItemFilter, setSelectedItemFilter] = useState("ALL")
   const [selectedVendorFilter, setSelectedVendorFilter] = useState("ALL")
   const [selectedDateRange, setSelectedDateRange] = useState<DateRangeOption>("ALL")
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(() =>
-    String(new Date().getMonth() + 1).padStart(2, "0")
-  )
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>("04")
   const [customStartDate, setCustomStartDate] = useState("")
   const [customEndDate, setCustomEndDate] = useState("")
   const [displayLimit, setDisplayLimit] = useState(250)
@@ -263,7 +261,7 @@ export default function PurchasesPage() {
     setSelectedItemFilter("ALL")
     setSelectedVendorFilter("ALL")
     setSelectedDateRange("ALL")
-    setSelectedMonthFilter(String(new Date().getMonth() + 1).padStart(2, "0"))
+    setSelectedMonthFilter("04")
     setSelectedFY(currentFinancialYear)
     setSearchQuery("")
     setCustomStartDate("")
@@ -1202,6 +1200,14 @@ export default function PurchasesPage() {
     )
   }
 
+  const selectedMonthObj = FY_MONTHS.find((m) => m.value === selectedMonthFilter)
+  const selectedMonthYear = currentFYYears
+    ? (parseInt(selectedMonthFilter, 10) >= 4 ? currentFYYears.startYear : currentFYYears.endYear)
+    : null
+  const selectedMonthLabel = selectedMonthObj
+    ? `${selectedMonthObj.name}${selectedMonthYear ? ` (${selectedMonthYear})` : ""}`
+    : "April"
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -1216,8 +1222,8 @@ export default function PurchasesPage() {
           </p>
         </div>
         <div className="flex flex-col sm:items-end gap-2 shrink-0">
-          {/* Line 1: Single purchase aur bulk purchase */}
-          <div className="flex items-center gap-2">
+          {/* Row 1: Add New Purchase, Bulk Purchase Entry, Bulk Delete */}
+          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
             <Button size="sm" onClick={handleOpenAddModal} className="h-8 text-xs bg-primary hover:bg-saffron-dark text-white font-semibold shadow-xs">
               <Plus className="h-3.5 w-3.5 mr-1.5" /> Add New Purchase
             </Button>
@@ -1229,8 +1235,18 @@ export default function PurchasesPage() {
             >
               <ListPlus className="h-3.5 w-3.5 mr-1.5" /> Bulk Purchase Entry
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteOpen(true)}
+              className="h-8 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-semibold"
+              title="Bulk delete incorrect entries by vendor, item, date or month"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Bulk Delete
+            </Button>
           </div>
-          {/* Line 2: Import, Export aur Bulk Delete */}
+
+          {/* Row 2: Import, Export, Merge Entries */}
           <div className="flex items-center gap-2 flex-wrap sm:justify-end">
             <Button
               variant="outline"
@@ -1248,18 +1264,9 @@ export default function PurchasesPage() {
               size="sm"
               onClick={() => setIsConsolidateOpen(true)}
               className="h-8 text-xs border-blue-500/40 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 font-semibold"
-              title="Consolidate multiple same-day deliveries from same vendor into single rows with zero data loss"
+              title="Consolidate duplicate entries on the same date with zero data loss"
             >
-              <Merge className="h-3.5 w-3.5 mr-1.5" /> Merge Same-Day
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsBulkDeleteOpen(true)}
-              className="h-8 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-semibold"
-              title="Bulk delete incorrect entries by vendor, item, date or month"
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Bulk Delete
+              <Merge className="h-3.5 w-3.5 mr-1.5" /> Merge Entries
             </Button>
           </div>
         </div>
@@ -1407,7 +1414,9 @@ export default function PurchasesPage() {
                     </Label>
                     <Select value={selectedMonthFilter} onValueChange={(val) => val && setSelectedMonthFilter(val)}>
                       <SelectTrigger className="text-xs h-8">
-                        <SelectValue placeholder="Select Month..." />
+                        <SelectValue placeholder="Select Month...">
+                          {selectedMonthLabel}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {FY_MONTHS.map((m) => {

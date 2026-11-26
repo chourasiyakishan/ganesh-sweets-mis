@@ -6,6 +6,7 @@ import {
   Plus,
   Search,
   Download,
+  Upload,
   Trash2,
   Edit,
   StickyNote,
@@ -22,11 +23,14 @@ import {
   Building,
   TrendingDown,
   TrendingUp,
+  Merge,
+  ShieldAlert,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent } from "@/components/ui/card"
@@ -39,12 +43,16 @@ import {
   ExpenseEntry,
   ExpenseCategory,
 } from "@/lib/mockData"
-import { fetchExpenses } from "@/lib/supabase/data-service"
+import { fetchExpenses, saveExpensesToDb, deleteExpensesFromDb, saveExpenseToDb } from "@/lib/supabase/data-service"
+import { ImportExpensesModal } from "./import-expenses-modal"
+import { ConsolidateExpensesModal } from "./consolidate-modal"
+import { BulkDeleteExpensesModal } from "./bulk-delete-modal"
+import { FY_MONTHS, parseFYYears } from "../purchases/page"
 import { toast } from "sonner"
 
 type SortField = "expenseDate" | "category" | "title" | "amount" | "remarks"
 type SortOrder = "asc" | "desc"
-type DateDurationOption = "ALL" | "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "LAST_QUARTER" | "CUSTOM"
+type DateDurationOption = "ALL" | "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "LAST_QUARTER" | "SELECTED_MONTH" | "CUSTOM"
 
 interface BulkExpenseRow {
   id: string
@@ -159,6 +167,23 @@ export default function ExpensesPage() {
   const [editingExpense, setEditingExpense] = useState<ExpenseEntry | null>(null)
   const [noteExpense, setNoteExpense] = useState<ExpenseEntry | null>(null)
   const [isBulkOpen, setIsBulkOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isConsolidateOpen, setIsConsolidateOpen] = useState(false)
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
+  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([])
+  const [isBatchConfirmOpen, setIsBatchConfirmOpen] = useState(false)
+
+  // Selected Month filter state (defaults to April "04")
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>("04")
+  const currentFYYears = useMemo(() => parseFYYears(selectedFY), [selectedFY])
+
+  const selectedMonthObj = FY_MONTHS.find((m) => m.value === selectedMonthFilter)
+  const selectedMonthYear = currentFYYears
+    ? (parseInt(selectedMonthFilter, 10) >= 4 ? currentFYYears.startYear : currentFYYears.endYear)
+    : null
+  const selectedMonthLabel = selectedMonthObj
+    ? `${selectedMonthObj.name}${selectedMonthYear ? ` (${selectedMonthYear})` : ""}`
+    : "April"
 
   // Single Form State
   const [formData, setFormData] = useState({
@@ -245,6 +270,15 @@ export default function ExpensesPage() {
             exp.expenseDate.startsWith("2025-11") ||
             exp.expenseDate.startsWith("2025-12")
           if (!isQ3) return false
+        } else if (selectedDuration === "SELECTED_MONTH") {
+          if (selectedFY !== "ALL" && currentFYYears) {
+            const mNum = parseInt(selectedMonthFilter, 10)
+            const year = mNum >= 4 ? currentFYYears.startYear : currentFYYears.endYear
+            const prefix = `${year}-${selectedMonthFilter}`
+            if (!exp.expenseDate.startsWith(prefix)) return false
+          } else {
+            if (exp.expenseDate.slice(5, 7) !== selectedMonthFilter) return false
+          }
         } else if (selectedDuration === "CUSTOM") {
           if (customStartDate && exp.expenseDate < customStartDate) return false
           if (customEndDate && exp.expenseDate > customEndDate) return false
@@ -288,6 +322,8 @@ export default function ExpensesPage() {
     selectedDuration,
     selectedFY,
     selectedCategory,
+    selectedMonthFilter,
+    currentFYYears,
     customStartDate,
     customEndDate,
     sortField,
@@ -505,13 +541,101 @@ export default function ExpensesPage() {
   }
 
   // --- Delete Expense Handler ---
-  const handleDeleteExpense = (id: string, title: string) => {
+  const handleDeleteExpense = async (id: string, title: string) => {
     if (confirm(`Are you sure you want to delete expense record: "${title}"?`)) {
       const updated = expenses.filter((e) => e.id !== id)
       updateExpenses(updated)
+      await deleteExpensesFromDb([id])
+      setSelectedRowIds((prev) => prev.filter((i) => i !== id))
       toast.success("Expense voucher deleted")
     }
   }
+
+  // --- Bulk Delete Operations ---
+  const handleBulkDeleteExpenses = async (idsToDelete: string[]) => {
+    if (idsToDelete.length === 0) return
+    const idsSet = new Set(idsToDelete)
+    const nextExpenses = expenses.filter((e) => !idsSet.has(e.id))
+    updateExpenses(nextExpenses)
+    await deleteExpensesFromDb(idsToDelete)
+    setSelectedRowIds((prev) => prev.filter((id) => !idsSet.has(id)))
+    setIsBatchConfirmOpen(false)
+    toast.success(`Successfully deleted ${idsToDelete.length} expense entries`)
+  }
+
+  // --- Same-Day Intraday Consolidation Handler ---
+  const handleConsolidateExpenses = async (
+    newExpenses: ExpenseEntry[],
+    mergedGroupsCount: number,
+    rowsSavedCount: number
+  ) => {
+    updateExpenses(newExpenses)
+    await saveExpensesToDb(newExpenses)
+    toast.success(`Consolidated ${rowsSavedCount} same-day duplicate entries across ${mergedGroupsCount} batches! Saved ${rowsSavedCount} rows with zero data loss.`)
+  }
+
+  // --- Bulk Import Handler ---
+  const handleImportExpenses = async (
+    newEntries: ExpenseEntry[],
+    mergedEntries: { existingId: string; additionalAmount: number; remarks?: string }[] = []
+  ) => {
+    let updatedExpenses = [...expenses]
+
+    if (mergedEntries.length > 0) {
+      updatedExpenses = updatedExpenses.map((e) => {
+        const merge = mergedEntries.find((m) => m.existingId === e.id)
+        if (merge) {
+          const newAmount = (e.amount || 0) + merge.additionalAmount
+          const updatedRemarks = e.remarks
+            ? `${e.remarks} | Merged +${formatINR(merge.additionalAmount)}`
+            : `Merged +${formatINR(merge.additionalAmount)}`
+          return {
+            ...e,
+            amount: newAmount,
+            remarks: updatedRemarks,
+          }
+        }
+        return e
+      })
+    }
+
+    const nextExpenses = [...newEntries, ...updatedExpenses]
+    updateExpenses(nextExpenses)
+    await saveExpensesToDb(nextExpenses)
+    setSelectedFY("ALL")
+
+    toast.success(`Import complete: ${newEntries.length} new entries added, ${mergedEntries.length} entries merged.`)
+  }
+
+  const selectedRowSet = useMemo(() => new Set(selectedRowIds), [selectedRowIds])
+
+  const handleToggleRowSelection = (id: string) => {
+    setSelectedRowIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    )
+  }
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = filteredAndSortedExpenses.map((e) => e.id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedRowSet.has(id))
+    if (allSelected) {
+      setSelectedRowIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
+    } else {
+      const combined = new Set([...selectedRowIds, ...visibleIds])
+      setSelectedRowIds(Array.from(combined))
+    }
+  }
+
+  const selectedTotalAmount = useMemo(() => {
+    if (selectedRowIds.length === 0) return 0
+    let sum = 0
+    for (let i = 0; i < expenses.length; i++) {
+      if (selectedRowSet.has(expenses[i].id)) {
+        sum += expenses[i].amount || 0
+      }
+    }
+    return sum
+  }, [selectedRowSet, selectedRowIds.length, expenses])
 
   // --- Toggle Status Quick Action ---
   const handleToggleStatus = (exp: ExpenseEntry) => {
@@ -636,6 +760,7 @@ export default function ExpensesPage() {
     setSelectedDuration("ALL")
     setSelectedFY("FY 2025-26")
     setSelectedCategory("ALL")
+    setSelectedMonthFilter("04")
     setCustomStartDate("")
     setCustomEndDate("")
   }
@@ -651,50 +776,80 @@ export default function ExpensesPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card p-6 rounded-xl border border-border shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card p-4 sm:p-5 rounded-xl border border-border shadow-xs">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-xl bg-saffron-container/30 border border-saffron/20 text-saffron shadow-xs">
+            <div className="p-2 rounded-xl bg-saffron-container/30 border border-saffron/20 text-saffron shadow-xs">
               <Receipt className="h-6 w-6" />
             </div>
             <div>
               <h1 className="text-headline text-foreground font-bold tracking-tight">
                 Expenses Management
               </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Record, track & audit operational expenditure (Salaries, Rent, Utilities, Maintenance, Packaging)
               </p>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportExcel}
-            className="h-9 gap-1.5 font-semibold text-xs border-border"
-          >
-            <Download className="h-4 w-4" /> Export Excel
-          </Button>
+        <div className="flex flex-col sm:items-end gap-2 shrink-0">
+          {/* Row 1: Add New Expense, Bulk Expense Entry, Bulk Delete */}
+          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+            <Button
+              size="sm"
+              onClick={handleOpenAdd}
+              className="h-8 text-xs bg-primary hover:bg-saffron-dark text-white font-semibold shadow-xs"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1.5" /> Add New Expense
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleOpenBulk}
+              className="h-8 text-xs border-saffron text-saffron hover:bg-saffron/10 font-semibold"
+            >
+              <ListPlus className="h-3.5 w-3.5 mr-1.5" /> Bulk Expense Entry
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteOpen(true)}
+              className="h-8 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-semibold"
+              title="Bulk delete incorrect expense entries by category, payee, date or month"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Bulk Delete
+            </Button>
+          </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleOpenBulk}
-            className="h-9 gap-1.5 font-semibold text-xs border-border text-foreground hover:bg-muted cursor-pointer"
-          >
-            <ListPlus className="h-4 w-4 text-saffron" /> Bulk Expense Entry
-          </Button>
-
-          <Button
-            size="sm"
-            onClick={handleOpenAdd}
-            className="h-9 gap-1.5 font-semibold text-xs bg-primary hover:bg-saffron-dark text-primary-foreground shadow-xs cursor-pointer"
-          >
-            <Plus className="h-4 w-4" /> Log Expense
-          </Button>
+          {/* Row 2: Import, Export, Merge Entries */}
+          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsImportOpen(true)}
+              className="h-8 text-xs border-border text-foreground hover:bg-muted font-medium"
+            >
+              <Upload className="h-3.5 w-3.5 mr-1.5 text-saffron" /> Import Excel / CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              className="h-8 text-xs border-border text-foreground hover:bg-muted font-medium"
+            >
+              <Download className="h-3.5 w-3.5 mr-1.5 text-saffron" /> Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsConsolidateOpen(true)}
+              className="h-8 text-xs border-blue-500/40 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 font-semibold"
+              title="Consolidate duplicate expense entries on the same date with zero data loss"
+            >
+              <Merge className="h-3.5 w-3.5 mr-1.5" /> Merge Entries
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -855,6 +1010,17 @@ export default function ExpensesPage() {
               </button>
               <button
                 type="button"
+                onClick={() => setSelectedDuration("SELECTED_MONTH")}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
+                  selectedDuration === "SELECTED_MONTH"
+                    ? "bg-card text-foreground shadow-xs border border-border/80"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Selected Month
+              </button>
+              <button
+                type="button"
                 onClick={() => setSelectedDuration("THIS_QUARTER")}
                 className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
                   selectedDuration === "THIS_QUARTER"
@@ -888,6 +1054,36 @@ export default function ExpensesPage() {
               </button>
             </div>
           </div>
+
+          {/* Selected Month Dropdown (Shown only if Duration == SELECTED_MONTH) */}
+          {selectedDuration === "SELECTED_MONTH" && (
+            <div className="flex items-center gap-3 pt-2 border-t border-border/60">
+              <div className="space-y-1 w-full max-w-xs">
+                <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-saffron" />
+                  Select Month ({selectedFY !== "ALL" ? selectedFY : "All Years"})
+                </Label>
+                <Select value={selectedMonthFilter} onValueChange={(val) => val && setSelectedMonthFilter(val)}>
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue placeholder="Select Month...">
+                      {selectedMonthLabel}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FY_MONTHS.map((m) => {
+                      const mNum = parseInt(m.value, 10)
+                      const year = currentFYYears ? (mNum >= 4 ? currentFYYears.startYear : currentFYYears.endYear) : null
+                      return (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.name} {year ? `(${year})` : ""}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
 
           {/* Secondary Filters Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/60 text-xs">
@@ -968,6 +1164,18 @@ export default function ExpensesPage() {
         <Table>
           <TableHeader className="bg-table-header">
             <TableRow className="hover:bg-transparent">
+              {/* Checkbox Select All */}
+              <TableHead className="w-10 px-3 text-center">
+                <Checkbox
+                  checked={
+                    filteredAndSortedExpenses.length > 0 &&
+                    filteredAndSortedExpenses.every((e) => selectedRowSet.has(e.id))
+                  }
+                  onCheckedChange={handleToggleSelectAllVisible}
+                  aria-label="Select all visible"
+                />
+              </TableHead>
+
               {/* 1. Date */}
               <TableHead
                 onClick={() => handleSort("expenseDate")}
@@ -1028,7 +1236,7 @@ export default function ExpensesPage() {
           <TableBody>
             {groupedExpensesByMonth.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-left py-10 text-muted-foreground text-sm">
+                <TableCell colSpan={7} className="text-left py-10 text-muted-foreground text-sm">
                   No expense records found matching filter criteria.
                 </TableCell>
               </TableRow>
@@ -1038,13 +1246,13 @@ export default function ExpensesPage() {
                   {/* Clean Blank Space Divider between Month Blocks */}
                   {groupIdx > 0 && (
                     <TableRow className="hover:bg-transparent border-none">
-                      <TableCell colSpan={6} className="h-6 py-2 border-none bg-transparent" />
+                      <TableCell colSpan={7} className="h-6 py-2 border-none bg-transparent" />
                     </TableRow>
                   )}
 
                   {/* Month Heading Row */}
                   <TableRow className="bg-saffron-container/40 dark:bg-saffron/20 hover:bg-saffron-container/50 border-t-4 border-t-saffron border-b-2 border-b-saffron/30 transition-colors shadow-2xs">
-                    <TableCell colSpan={6} className="py-3 px-4 text-left">
+                    <TableCell colSpan={7} className="py-3 px-4 text-left">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
                           <div className="p-1.5 rounded-md bg-saffron/20 text-saffron dark:text-saffron-light">
@@ -1074,6 +1282,15 @@ export default function ExpensesPage() {
                   {/* Expense Rows for this Month */}
                   {group.items.map((exp) => (
                     <TableRow key={exp.id} className="hover:bg-muted/50 transition-colors">
+                      {/* Checkbox Select Row */}
+                      <TableCell className="w-10 px-3 text-center">
+                        <Checkbox
+                          checked={selectedRowSet.has(exp.id)}
+                          onCheckedChange={() => handleToggleRowSelection(exp.id)}
+                          aria-label={`Select ${exp.title}`}
+                        />
+                      </TableCell>
+
                       {/* 1. Date (DD-MM-YYYY) - NO voucher code */}
                       <TableCell className="text-xs font-semibold text-foreground text-left whitespace-nowrap">
                         {formatDateDDMMYYYY(exp.expenseDate)}
@@ -1499,6 +1716,100 @@ export default function ExpensesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Bottom Selection Bar for Bulk Delete */}
+      {selectedRowIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card border border-border shadow-2xl rounded-full px-5 py-2.5 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-4">
+          <div className="text-xs font-semibold text-foreground">
+            <span className="text-destructive font-bold">{selectedRowIds.length}</span> entries selected
+            <span className="text-muted-foreground ml-2">Total: <strong>{formatINR(selectedTotalAmount)}</strong></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs cursor-pointer"
+              onClick={() => setSelectedRowIds([])}
+            >
+              Clear Selection
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 text-xs font-semibold gap-1.5 shadow-sm cursor-pointer"
+              onClick={() => setIsBatchConfirmOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete Selected ({selectedRowIds.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog: Confirm Deletion of Selected Checkbox Rows */}
+      <Dialog open={isBatchConfirmOpen} onOpenChange={setIsBatchConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="h-5 w-5" /> Confirm Batch Deletion
+            </DialogTitle>
+            <DialogDescription className="text-xs pt-1">
+              Are you sure you want to delete the selected <strong>{selectedRowIds.length}</strong> expense entries? This action will permanently remove them from the ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 my-2 space-y-2">
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-muted-foreground">Total Entries Selected:</span>
+              <span className="text-foreground">{selectedRowIds.length} rows</span>
+            </div>
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-muted-foreground">Total Combined Amount:</span>
+              <span className="text-destructive font-bold">{formatINR(selectedTotalAmount)}</span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" size="sm" onClick={() => setIsBatchConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => handleBulkDeleteExpenses(selectedRowIds)}
+              className="font-semibold gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" />
+              Yes, Delete {selectedRowIds.length} Entries
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Criteria-Based Bulk Delete */}
+      <BulkDeleteExpensesModal
+        isOpen={isBulkDeleteOpen}
+        onClose={() => setIsBulkDeleteOpen(false)}
+        expenses={expenses}
+        availableFYs={availableFYs}
+        onDeleteExpenses={handleBulkDeleteExpenses}
+      />
+
+      {/* Modal: Same-Day Entries Consolidation (Zero Data Loss) */}
+      <ConsolidateExpensesModal
+        isOpen={isConsolidateOpen}
+        onClose={() => setIsConsolidateOpen(false)}
+        expenses={expenses}
+        onConsolidate={handleConsolidateExpenses}
+      />
+
+      {/* Modal: Import Bulk Expenses from Excel/CSV */}
+      <ImportExpensesModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        existingExpenses={expenses}
+        onImport={handleImportExpenses}
+      />
     </div>
   )
 }
