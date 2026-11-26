@@ -41,7 +41,34 @@ import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
 type SortOrder = "asc" | "desc"
-type DateRangeOption = "ALL" | "TODAY" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM"
+type DateRangeOption = "ALL" | "TODAY" | "THIS_WEEK" | "THIS_MONTH" | "SELECTED_MONTH" | "CUSTOM"
+
+export const FY_MONTHS = [
+  { value: "04", name: "April" },
+  { value: "05", name: "May" },
+  { value: "06", name: "June" },
+  { value: "07", name: "July" },
+  { value: "08", name: "August" },
+  { value: "09", name: "September" },
+  { value: "10", name: "October" },
+  { value: "11", name: "November" },
+  { value: "12", name: "December" },
+  { value: "01", name: "January" },
+  { value: "02", name: "February" },
+  { value: "03", name: "March" },
+]
+
+export function parseFYYears(fy: string): { startYear: number; endYear: number } | null {
+  if (!fy || fy === "ALL") return null
+  const match = fy.match(/FY\s*(\d{4})-(\d{2})/i)
+  if (match) {
+    const startYear = parseInt(match[1], 10)
+    const century = match[1].slice(0, 2)
+    const endYear = parseInt(century + match[2], 10)
+    return { startYear, endYear }
+  }
+  return null
+}
 
 interface BulkPurchaseRow {
   id: string
@@ -53,28 +80,26 @@ interface BulkPurchaseRow {
 
 const STORAGE_KEY = "ganesh_sweets_purchases"
 
-// Indian Financial Year calculation (1 April - 31 March)
+// Fast Indian Financial Year calculation (1 April - 31 March)
 function getFinancialYear(dateStr: string): string {
   if (!dateStr) return "FY 2025-26"
-  let year: number
-  let month: number // 1-12
-  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-    const parts = dateStr.split("-")
-    year = parseInt(parts[0], 10)
-    month = parseInt(parts[1], 10)
-  } else {
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return "FY 2025-26"
-    year = d.getFullYear()
-    month = d.getMonth() + 1
+  if (dateStr.length >= 7 && dateStr[4] === "-") {
+    const year = parseInt(dateStr.slice(0, 4), 10)
+    const month = parseInt(dateStr.slice(5, 7), 10)
+    if (month <= 3) {
+      return `FY ${year - 1}-${String(year).slice(-2)}`
+    } else {
+      return `FY ${year}-${String(year + 1).slice(-2)}`
+    }
   }
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return "FY 2025-26"
+  const year = d.getFullYear()
+  const month = d.getMonth() + 1
   if (month <= 3) {
-    const prevYear = year - 1
-    const shortCurr = String(year).slice(-2)
-    return `FY ${prevYear}-${shortCurr}`
+    return `FY ${year - 1}-${String(year).slice(-2)}`
   } else {
-    const nextYearShort = String(year + 1).slice(-2)
-    return `FY ${year}-${nextYearShort}`
+    return `FY ${year}-${String(year + 1).slice(-2)}`
   }
 }
 
@@ -177,8 +202,38 @@ export default function PurchasesPage() {
   const [selectedItemFilter, setSelectedItemFilter] = useState("ALL")
   const [selectedVendorFilter, setSelectedVendorFilter] = useState("ALL")
   const [selectedDateRange, setSelectedDateRange] = useState<DateRangeOption>("ALL")
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(() =>
+    String(new Date().getMonth() + 1).padStart(2, "0")
+  )
   const [customStartDate, setCustomStartDate] = useState("")
   const [customEndDate, setCustomEndDate] = useState("")
+  const [displayLimit, setDisplayLimit] = useState(250)
+
+  // Reset display limit to 250 on filter change so table renders instantaneously
+  useEffect(() => {
+    setDisplayLimit(250)
+  }, [selectedFY, selectedItemFilter, selectedVendorFilter, selectedDateRange, selectedMonthFilter, searchQuery])
+
+  // Pre-calculate counts in a single O(N) pass to avoid expensive loop iterations during UI render
+  const { itemCounts, vendorCounts, fyCounts } = useMemo(() => {
+    const itemCounts: Record<string, number> = {}
+    const vendorCounts: Record<string, number> = {}
+    const fyCounts: Record<string, number> = {}
+
+    for (let i = 0; i < purchases.length; i++) {
+      const p = purchases[i]
+      if (p.itemName) itemCounts[p.itemName] = (itemCounts[p.itemName] || 0) + 1
+      if (p.vendorName) vendorCounts[p.vendorName] = (vendorCounts[p.vendorName] || 0) + 1
+      if (p.purchaseDate) {
+        const fy = getFinancialYear(p.purchaseDate)
+        fyCounts[fy] = (fyCounts[fy] || 0) + 1
+      }
+    }
+
+    return { itemCounts, vendorCounts, fyCounts }
+  }, [purchases])
+
+  const currentFYYears = useMemo(() => parseFYYears(selectedFY), [selectedFY])
 
   // Check if any filter has been modified from default
   const hasActiveFilters = useMemo(() => {
@@ -207,10 +262,12 @@ export default function PurchasesPage() {
     setSelectedItemFilter("ALL")
     setSelectedVendorFilter("ALL")
     setSelectedDateRange("ALL")
+    setSelectedMonthFilter(String(new Date().getMonth() + 1).padStart(2, "0"))
     setSelectedFY(currentFinancialYear)
     setSearchQuery("")
     setCustomStartDate("")
     setCustomEndDate("")
+    setDisplayLimit(250)
   }
 
   // Listen for search parameters from URL or Topbar universal search event
@@ -508,7 +565,15 @@ export default function PurchasesPage() {
     toast.success(`Logged ${newEntries.length} bulk purchase entries for ${bulkItemName} (${formatINR(bulkTotalValue)})`)
   }
 
-  // Simultaneous Filter & Universal Sorting Logic
+  const MONTH_NAMES = useMemo(
+    () => [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ],
+    []
+  )
+
+  // Simultaneous Filter & Universal Sorting Logic - Ultra-fast O(N) execution
   const filteredAndSortedPurchases = useMemo(() => {
     const now = new Date()
     const todayStr = now.toISOString().split("T")[0]
@@ -520,32 +585,67 @@ export default function PurchasesPage() {
 
     const startOfMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
 
+    // Precalculate target month prefix for SELECTED_MONTH
+    let selectedMonthTargetPrefix: string | null = null
+    if (selectedDateRange === "SELECTED_MONTH") {
+      if (selectedFY !== "ALL" && currentFYYears) {
+        const mNum = parseInt(selectedMonthFilter, 10)
+        const year = mNum >= 4 ? currentFYYears.startYear : currentFYYears.endYear
+        selectedMonthTargetPrefix = `${year}-${selectedMonthFilter}`
+      }
+    }
+
+    // Precalculate FY date boundaries if selectedFY is not "ALL"
+    let fyStartStr: string | null = null
+    let fyEndStr: string | null = null
+    if (selectedFY !== "ALL" && currentFYYears) {
+      fyStartStr = `${currentFYYears.startYear}-04-01`
+      fyEndStr = `${currentFYYears.endYear}-03-31`
+    }
+
+    const q = searchQuery.trim().toLowerCase()
+
     return purchases
       .filter((p) => {
-        const q = searchQuery.toLowerCase()
-        const matchesSearch =
-          p.itemName.toLowerCase().includes(q) ||
-          p.vendorName.toLowerCase().includes(q) ||
-          (p.remarks && p.remarks.toLowerCase().includes(q))
-
-        const matchesItem = selectedItemFilter === "ALL" || p.itemName === selectedItemFilter
-        const matchesVendor = selectedVendorFilter === "ALL" || p.vendorName === selectedVendorFilter
-
-        let matchesDate = true
-        if (selectedDateRange === "TODAY") {
-          matchesDate = p.purchaseDate === todayStr
-        } else if (selectedDateRange === "THIS_WEEK") {
-          matchesDate = p.purchaseDate >= startOfWeekStr && p.purchaseDate <= todayStr
-        } else if (selectedDateRange === "THIS_MONTH") {
-          matchesDate = p.purchaseDate >= startOfMonthStr && p.purchaseDate <= todayStr
-        } else if (selectedDateRange === "CUSTOM") {
-          if (customStartDate && p.purchaseDate < customStartDate) matchesDate = false
-          if (customEndDate && p.purchaseDate > customEndDate) matchesDate = false
+        // Fast FY check using ISO string boundaries
+        if (fyStartStr && fyEndStr) {
+          if (p.purchaseDate < fyStartStr || p.purchaseDate > fyEndStr) return false
+        } else if (selectedFY !== "ALL") {
+          if (getFinancialYear(p.purchaseDate) !== selectedFY) return false
         }
 
-        const matchesFY = selectedFY === "ALL" || getFinancialYear(p.purchaseDate) === selectedFY
+        // Fast Item & Vendor checks
+        if (selectedItemFilter !== "ALL" && p.itemName !== selectedItemFilter) return false
+        if (selectedVendorFilter !== "ALL" && p.vendorName !== selectedVendorFilter) return false
 
-        return matchesSearch && matchesItem && matchesVendor && matchesDate && matchesFY
+        // Date Range check
+        if (selectedDateRange === "TODAY") {
+          if (p.purchaseDate !== todayStr) return false
+        } else if (selectedDateRange === "THIS_WEEK") {
+          if (p.purchaseDate < startOfWeekStr || p.purchaseDate > todayStr) return false
+        } else if (selectedDateRange === "THIS_MONTH") {
+          if (p.purchaseDate < startOfMonthStr || p.purchaseDate > todayStr) return false
+        } else if (selectedDateRange === "SELECTED_MONTH") {
+          if (selectedMonthTargetPrefix) {
+            if (!p.purchaseDate.startsWith(selectedMonthTargetPrefix)) return false
+          } else {
+            // If FY is ALL, match the 2-digit month portion "YYYY-MM-DD" -> slice(5, 7)
+            if (p.purchaseDate.slice(5, 7) !== selectedMonthFilter) return false
+          }
+        } else if (selectedDateRange === "CUSTOM") {
+          if (customStartDate && p.purchaseDate < customStartDate) return false
+          if (customEndDate && p.purchaseDate > customEndDate) return false
+        }
+
+        // Search Query check
+        if (q) {
+          const itemMatch = p.itemName.toLowerCase().includes(q)
+          const vendorMatch = p.vendorName.toLowerCase().includes(q)
+          const remarksMatch = p.remarks ? p.remarks.toLowerCase().includes(q) : false
+          if (!itemMatch && !vendorMatch && !remarksMatch) return false
+        }
+
+        return true
       })
       .sort((a, b) => {
         let valA: string | number = ""
@@ -577,56 +677,84 @@ export default function PurchasesPage() {
           valB = b.remarks || ""
         }
 
-        let comparison = 0
         if (typeof valA === "number" && typeof valB === "number") {
-          comparison = valA - valB
-        } else {
-          comparison = String(valA).localeCompare(String(valB), undefined, { sensitivity: "base" })
+          return sortOrder === "asc" ? valA - valB : valB - valA
         }
 
-        return sortOrder === "asc" ? comparison : -comparison
+        const strA = String(valA)
+        const strB = String(valB)
+        const comp = strA < strB ? -1 : strA > strB ? 1 : 0
+        return sortOrder === "asc" ? comp : -comp
       })
   }, [
     purchases,
     searchQuery,
     selectedFY,
+    currentFYYears,
     selectedItemFilter,
     selectedVendorFilter,
     selectedDateRange,
+    selectedMonthFilter,
     customStartDate,
     customEndDate,
     sortField,
     sortOrder,
   ])
 
-  // Month-wise Grouped Structure for Table Display
+  // Fast Month-wise Grouped Structure for Table Display using Map
   const groupedPurchasesByMonth = useMemo(() => {
-    const groups: { monthGroup: string; items: PurchaseEntry[]; totalAmount: number }[] = []
+    const groupMap = new Map<string, { monthGroup: string; items: PurchaseEntry[]; totalAmount: number; totalCount: number }>()
 
-    filteredAndSortedPurchases.forEach((p) => {
+    for (let i = 0; i < filteredAndSortedPurchases.length; i++) {
+      const p = filteredAndSortedPurchases[i]
       let monthGroup: string
-      if (/^\d{4}-\d{2}-\d{2}/.test(p.purchaseDate)) {
-        const [y, m, d] = p.purchaseDate.split("-").map(Number)
-        const dateObj = new Date(y, m - 1, d)
-        monthGroup = dateObj.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+      if (p.purchaseDate && p.purchaseDate.length >= 7 && p.purchaseDate[4] === "-") {
+        const y = p.purchaseDate.slice(0, 4)
+        const m = parseInt(p.purchaseDate.slice(5, 7), 10)
+        monthGroup = `${MONTH_NAMES[m - 1] || "Month"} ${y}`
       } else {
-        const dateObj = new Date(p.purchaseDate)
-        monthGroup = !isNaN(dateObj.getTime())
-          ? dateObj.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
-          : p.monthGroup || "Other"
+        monthGroup = p.monthGroup || "Other"
       }
 
-      let group = groups.find((g) => g.monthGroup === monthGroup)
+      let group = groupMap.get(monthGroup)
       if (!group) {
-        group = { monthGroup, items: [], totalAmount: 0 }
-        groups.push(group)
+        group = { monthGroup, items: [], totalAmount: 0, totalCount: 0 }
+        groupMap.set(monthGroup, group)
       }
       group.items.push(p)
       group.totalAmount += p.total
-    })
+      group.totalCount += 1
+    }
 
-    return groups
-  }, [filteredAndSortedPurchases])
+    return Array.from(groupMap.values())
+  }, [filteredAndSortedPurchases, MONTH_NAMES])
+
+  // Progressive slice for instant table render with thousands of entries
+  const displayedGroupedPurchases = useMemo(() => {
+    if (filteredAndSortedPurchases.length <= displayLimit) {
+      return groupedPurchasesByMonth
+    }
+
+    let remaining = displayLimit
+    const result: typeof groupedPurchasesByMonth = []
+
+    for (const group of groupedPurchasesByMonth) {
+      if (remaining <= 0) break
+      if (group.items.length <= remaining) {
+        result.push(group)
+        remaining -= group.items.length
+      } else {
+        result.push({
+          ...group,
+          items: group.items.slice(0, remaining),
+        })
+        remaining = 0
+        break
+      }
+    }
+
+    return result
+  }, [groupedPurchasesByMonth, displayLimit, filteredAndSortedPurchases.length])
 
   // Total filtered value calculation
   const totalPurchaseValue = useMemo(() => {
@@ -846,6 +974,8 @@ export default function PurchasesPage() {
     toast.success(`Successfully deleted ${idsToDelete.length} purchase entries`)
   }
 
+  const selectedRowSet = useMemo(() => new Set(selectedRowIds), [selectedRowIds])
+
   const handleToggleRowSelection = (id: string) => {
     setSelectedRowIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
@@ -854,7 +984,7 @@ export default function PurchasesPage() {
 
   const handleToggleSelectAllVisible = () => {
     const visibleIds = filteredAndSortedPurchases.map((p) => p.id)
-    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedRowIds.includes(id))
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedRowSet.has(id))
     if (allSelected) {
       setSelectedRowIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
     } else {
@@ -864,11 +994,15 @@ export default function PurchasesPage() {
   }
 
   const selectedTotalAmount = useMemo(() => {
-    return selectedRowIds.reduce((sum, id) => {
-      const found = purchases.find((p) => p.id === id)
-      return sum + (found?.total || 0)
-    }, 0)
-  }, [selectedRowIds, purchases])
+    if (selectedRowIds.length === 0) return 0
+    let sum = 0
+    for (let i = 0; i < purchases.length; i++) {
+      if (selectedRowSet.has(purchases[i].id)) {
+        sum += purchases[i].total || 0
+      }
+    }
+    return sum
+  }, [selectedRowSet, selectedRowIds.length, purchases])
 
   const handleExportCSV = () => {
     if (filteredAndSortedPurchases.length === 0) {
@@ -1163,14 +1297,11 @@ export default function PurchasesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All Financial Years ({purchases.length})</SelectItem>
-                      {availableFinancialYears.map((fy) => {
-                        const count = purchases.filter((p) => getFinancialYear(p.purchaseDate) === fy).length
-                        return (
-                          <SelectItem key={fy} value={fy}>
-                            {fy} ({count})
-                          </SelectItem>
-                        )
-                      })}
+                      {availableFinancialYears.map((fy) => (
+                        <SelectItem key={fy} value={fy}>
+                          {fy} ({fyCounts[fy] || 0})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1184,14 +1315,11 @@ export default function PurchasesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All ({purchases.length})</SelectItem>
-                      {uniqueItemsList.map((item) => {
-                        const count = purchases.filter((p) => p.itemName === item).length
-                        return (
-                          <SelectItem key={item} value={item}>
-                            {item} ({count})
-                          </SelectItem>
-                        )
-                      })}
+                      {uniqueItemsList.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item} ({itemCounts[item] || 0})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1205,14 +1333,11 @@ export default function PurchasesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All</SelectItem>
-                      {uniqueVendorsList.map((v) => {
-                        const count = purchases.filter((p) => p.vendorName === v).length
-                        return (
-                          <SelectItem key={v} value={v}>
-                            {v} ({count})
-                          </SelectItem>
-                        )
-                      })}
+                      {uniqueVendorsList.map((v) => (
+                        <SelectItem key={v} value={v}>
+                          {v} ({vendorCounts[v] || 0})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1229,6 +1354,7 @@ export default function PurchasesPage() {
                       <SelectItem value="TODAY">Today</SelectItem>
                       <SelectItem value="THIS_WEEK">This Week</SelectItem>
                       <SelectItem value="THIS_MONTH">This Month</SelectItem>
+                      <SelectItem value="SELECTED_MONTH">Selected Month</SelectItem>
                       <SelectItem value="CUSTOM">Custom Range</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1248,6 +1374,34 @@ export default function PurchasesPage() {
                   )}
                 </div>
               </div>
+
+              {/* Selected Month Dropdown (Shown only if Date Range == SELECTED_MONTH) */}
+              {selectedDateRange === "SELECTED_MONTH" && (
+                <div className="flex items-center gap-3 pt-2 border-t border-border">
+                  <div className="space-y-1 w-full max-w-xs">
+                    <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 text-saffron" />
+                      Select Month ({selectedFY !== "ALL" ? selectedFY : "All Years"})
+                    </Label>
+                    <Select value={selectedMonthFilter} onValueChange={(val) => val && setSelectedMonthFilter(val)}>
+                      <SelectTrigger className="text-xs h-8">
+                        <SelectValue placeholder="Select Month..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FY_MONTHS.map((m) => {
+                          const mNum = parseInt(m.value, 10)
+                          const year = currentFYYears ? (mNum >= 4 ? currentFYYears.startYear : currentFYYears.endYear) : null
+                          return (
+                            <SelectItem key={m.value} value={m.value}>
+                              {m.name} {year ? `(${year})` : ""}
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
 
               {/* Custom Date Pickers (Shown only if Date Range == CUSTOM) */}
               {selectedDateRange === "CUSTOM" && (
@@ -1287,7 +1441,7 @@ export default function PurchasesPage() {
                 <Checkbox
                   checked={
                     filteredAndSortedPurchases.length > 0 &&
-                    filteredAndSortedPurchases.every((p) => selectedRowIds.includes(p.id))
+                    filteredAndSortedPurchases.every((p) => selectedRowSet.has(p.id))
                   }
                   onCheckedChange={handleToggleSelectAllVisible}
                   aria-label="Select all visible entries"
@@ -1382,14 +1536,14 @@ export default function PurchasesPage() {
           </TableHeader>
 
           <TableBody>
-            {groupedPurchasesByMonth.length === 0 ? (
+            {displayedGroupedPurchases.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={10} className="text-left py-10 text-muted-foreground text-sm">
                   No purchase entries found matching filter criteria.
                 </TableCell>
               </TableRow>
             ) : (
-              groupedPurchasesByMonth.map((group, groupIdx) => (
+              displayedGroupedPurchases.map((group, groupIdx) => (
                 <Fragment key={group.monthGroup}>
                   {/* Clean Blank Space Divider between Month Blocks */}
                   {groupIdx > 0 && (
@@ -1411,7 +1565,7 @@ export default function PurchasesPage() {
                                 {group.monthGroup}
                               </span>
                               <span className="text-sm font-bold text-muted-foreground">
-                                ({group.items.length} {group.items.length === 1 ? "Entry" : "Entries"})
+                                ({group.totalCount} {group.totalCount === 1 ? "Entry" : "Entries"})
                               </span>
                             </div>
                           </div>
@@ -1432,13 +1586,13 @@ export default function PurchasesPage() {
                       <TableRow
                         key={p.id}
                         className={`hover:bg-muted/50 transition-colors ${
-                          selectedRowIds.includes(p.id) ? "bg-primary/5 dark:bg-primary/10" : ""
+                          selectedRowSet.has(p.id) ? "bg-primary/5 dark:bg-primary/10" : ""
                         }`}
                       >
                         {/* Checkbox for row selection */}
                         <TableCell className="w-10 text-center px-3">
                           <Checkbox
-                            checked={selectedRowIds.includes(p.id)}
+                            checked={selectedRowSet.has(p.id)}
                             onCheckedChange={() => handleToggleRowSelection(p.id)}
                             aria-label={`Select ${p.itemName}`}
                           />
@@ -1518,6 +1672,34 @@ export default function PurchasesPage() {
               )}
             </TableBody>
           </Table>
+
+          {/* Fast Load More Bar for Large Datasets */}
+          {filteredAndSortedPurchases.length > displayLimit && (
+            <div className="p-3.5 bg-muted/30 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground font-medium">
+                Showing first <strong className="text-foreground">{displayLimit}</strong> of{" "}
+                <strong className="text-foreground">{filteredAndSortedPurchases.length}</strong> entries (Fast render active).
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDisplayLimit((prev) => prev + 250)}
+                  className="h-8 text-xs font-semibold cursor-pointer"
+                >
+                  Load Next 250 Rows
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setDisplayLimit(filteredAndSortedPurchases.length)}
+                  className="h-8 text-xs font-semibold cursor-pointer"
+                >
+                  Show All ({filteredAndSortedPurchases.length})
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
 
       {/* Note View Dialog */}

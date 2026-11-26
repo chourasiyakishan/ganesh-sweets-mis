@@ -5,18 +5,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+const inrFormatter = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+})
+
 /**
  * Format number in Indian notation (e.g., 1,23,456.00)
  */
 export function formatINR(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined) return "₹0"
-  const formatted = new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount)
-  return formatted
+  if (amount === null || amount === undefined || isNaN(amount)) return "₹0"
+  return inrFormatter.format(amount)
 }
 
 /**
