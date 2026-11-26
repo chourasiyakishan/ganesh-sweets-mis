@@ -277,6 +277,33 @@ export async function savePurchaseToDb(entry: PurchaseEntry): Promise<void> {
   }
 }
 
+export async function savePurchasesToDb(entries: PurchaseEntry[]): Promise<void> {
+  if (isSupabaseConfigured() && entries.length > 0) {
+    try {
+      const supabase = createClient()
+      const chunkSize = 100
+      for (let i = 0; i < entries.length; i += chunkSize) {
+        const chunk = entries.slice(i, i + chunkSize).map((entry) => ({
+          id: entry.id && entry.id.length > 20 ? entry.id : undefined,
+          purchase_date: entry.purchaseDate || entry.date,
+          month_group: entry.monthGroup || "Active",
+          item_name: entry.itemName,
+          lot_number: entry.lotNumber || "",
+          vendor_name: entry.vendorName,
+          quantity: entry.quantity,
+          unit: entry.unit,
+          rate: entry.rate,
+          total: entry.total,
+          remarks: entry.remarks || "",
+        }))
+        await supabase.from("purchases").upsert(chunk)
+      }
+    } catch (e) {
+      console.warn("Supabase savePurchasesToDb error:", e)
+    }
+  }
+}
+
 export async function deletePurchasesFromDb(ids: string[]): Promise<void> {
   if (isSupabaseConfigured() && ids.length > 0) {
     try {

@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useMemo } from "react"
 import * as XLSX from "xlsx"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { PurchaseEntry, Item, Vendor } from "@/lib/mockData"
@@ -43,6 +44,10 @@ interface ParsedPurchaseRow {
   existingRate?: number
   existingTotal?: number
   action: ConflictAction
+  // Same-day consolidation within the file
+  isMergedIntraDay?: boolean
+  mergedCount?: number
+  mergedBreakdown?: string
 }
 
 interface ImportPurchasesModalProps {
@@ -184,6 +189,7 @@ export function ImportPurchasesModal({
   const [parsedRows, setParsedRows] = useState<ParsedPurchaseRow[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [consolidateSameDay, setConsolidateSameDay] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Reset modal state
@@ -510,9 +516,84 @@ export function ImportPurchasesModal({
     }
   }
 
+  // Intra-file same-day duplicates analysis
+  const intraDayDuplicateSummary = useMemo(() => {
+    const map = new Map<string, ParsedPurchaseRow[]>()
+    parsedRows.forEach((r) => {
+      if (!r.isValid || r.action !== "new") return
+      const key = `${r.purchaseDate}|${r.vendorName.trim().toLowerCase()}|${r.itemName.trim().toLowerCase()}`
+      const list = map.get(key) || []
+      list.push(r)
+      map.set(key, list)
+    })
+
+    let duplicateGroups = 0
+    let duplicateRowsCount = 0
+    map.forEach((rows) => {
+      if (rows.length > 1) {
+        duplicateGroups++
+        duplicateRowsCount += rows.length
+      }
+    })
+
+    const rowsSaved = duplicateRowsCount > 0 ? duplicateRowsCount - duplicateGroups : 0
+    return { duplicateGroups, duplicateRowsCount, rowsSaved }
+  }, [parsedRows])
+
+  // Effective rows after applying same-day consolidation if enabled
+  const effectiveRows = useMemo(() => {
+    if (!consolidateSameDay) return parsedRows
+
+    const map = new Map<string, ParsedPurchaseRow[]>()
+    const otherRows: ParsedPurchaseRow[] = []
+
+    parsedRows.forEach((r) => {
+      if (!r.isValid || r.action !== "new") {
+        otherRows.push(r)
+        return
+      }
+      const key = `${r.purchaseDate}|${r.vendorName.trim().toLowerCase()}|${r.itemName.trim().toLowerCase()}`
+      const list = map.get(key) || []
+      list.push(r)
+      map.set(key, list)
+    })
+
+    const consolidated: ParsedPurchaseRow[] = []
+    map.forEach((group) => {
+      if (group.length === 1) {
+        consolidated.push(group[0])
+      } else {
+        const first = group[0]
+        const totalQty = group.reduce((sum, g) => sum + g.quantity, 0)
+        const totalAmount = group.reduce((sum, g) => sum + g.total, 0)
+        const weightedRate = totalQty > 0 ? Math.round((totalAmount / totalQty) * 100) / 100 : first.rate
+        const qtyBreakdown = group.map((g) => `${g.quantity} ${g.unit}`).join(" + ")
+        const existingNotes = group
+          .map((g) => g.remarks)
+          .filter(Boolean)
+          .join(" | ")
+        const consolidationNote = `Merged ${group.length} same-day entries (${qtyBreakdown})`
+
+        consolidated.push({
+          ...first,
+          rowId: `merged-file-${first.rowId}-${group.length}`,
+          quantity: Math.round(totalQty * 1000) / 1000,
+          total: Math.round(totalAmount * 100) / 100,
+          rate: weightedRate,
+          remarks: existingNotes ? `${existingNotes} | ${consolidationNote}` : consolidationNote,
+          isMergedIntraDay: true,
+          mergedCount: group.length,
+          mergedBreakdown: qtyBreakdown,
+        })
+      }
+    })
+
+    return [...consolidated, ...otherRows]
+  }, [parsedRows, consolidateSameDay])
+
   // Commit valid rows to ledger with actions
   const handleConfirmImport = () => {
-    const validRows = parsedRows.filter((r) => r.isValid)
+    const validRows = effectiveRows.filter((r) => r.isValid)
     if (validRows.length === 0) {
       toast.error("No valid entries found to import")
       return
@@ -558,19 +639,19 @@ export function ImportPurchasesModal({
     handleClose()
   }
 
-  const validEntries = parsedRows.filter((r) => r.isValid)
-  const invalidEntries = parsedRows.filter((r) => !r.isValid)
-  const duplicateEntries = parsedRows.filter((r) => r.isValid && r.isDuplicate)
-  const toAddEntries = parsedRows.filter((r) => r.isValid && r.action === "new")
-  const toMergeEntries = parsedRows.filter((r) => r.isValid && r.action === "merge")
-  const toSkipEntries = parsedRows.filter((r) => !r.isValid || r.action === "skip")
+  const validEntries = effectiveRows.filter((r) => r.isValid)
+  const invalidEntries = effectiveRows.filter((r) => !r.isValid)
+  const duplicateEntries = effectiveRows.filter((r) => r.isValid && r.isDuplicate)
+  const toAddEntries = effectiveRows.filter((r) => r.isValid && r.action === "new")
+  const toMergeEntries = effectiveRows.filter((r) => r.isValid && r.action === "merge")
+  const toSkipEntries = effectiveRows.filter((r) => !r.isValid || r.action === "skip")
 
   const totalValue = toAddEntries.reduce((sum, r) => sum + r.total, 0)
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="sm:max-w-5xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-5xl max-h-[88vh] flex flex-col p-4 sm:p-5 overflow-hidden">
+        <DialogHeader className="shrink-0 pb-1">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-base">
               <FileSpreadsheet className="h-5 w-5 text-saffron" />
@@ -592,271 +673,336 @@ export function ImportPurchasesModal({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Dropzone Area */}
-        {!selectedFile ? (
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-              isDragging ? "border-saffron bg-saffron-container/20" : "border-border hover:border-saffron/50 hover:bg-muted/30"
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <div className="flex flex-col items-center gap-2.5">
-              <div className="w-12 h-12 rounded-full bg-saffron-container/30 flex items-center justify-center text-saffron">
-                <Upload className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-foreground">
-                  Click to browse or drag & drop Excel / CSV file
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Columns: <strong>Date</strong>, <strong>Vendor Name</strong>, <strong>Item Name</strong>, <strong>Quantity</strong>, <strong>Unit</strong>, <strong>Price Amount</strong>.
-                </p>
-              </div>
-              <Button type="button" variant="secondary" size="sm" className="mt-1 text-xs font-semibold">
-                Select File
-              </Button>
-            </div>
-          </div>
-        ) : (
-          /* File Selected Header Bar */
-          <div className="bg-card p-3 rounded-lg border border-border flex items-center justify-between">
-            <div className="flex items-center gap-2.5 truncate">
-              <FileSpreadsheet className="h-5 w-5 text-saffron shrink-0" />
-              <div className="truncate">
-                <p className="text-xs font-bold text-foreground truncate">{selectedFile.name}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {(selectedFile.size / 1024).toFixed(1)} KB • {parsedRows.length} total rows read
-                </p>
+        {/* Scrollable Modal Content */}
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1 py-1">
+          {/* Dropzone Area */}
+          {!selectedFile ? (
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                isDragging ? "border-saffron bg-saffron-container/20" : "border-border hover:border-saffron/50 hover:bg-muted/30"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <div className="flex flex-col items-center gap-2.5">
+                <div className="w-12 h-12 rounded-full bg-saffron-container/30 flex items-center justify-center text-saffron">
+                  <Upload className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-foreground">
+                    Click to browse or drag & drop Excel / CSV file
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Columns: <strong>Date</strong>, <strong>Vendor Name</strong>, <strong>Item Name</strong>, <strong>Quantity</strong>, <strong>Unit</strong>, <strong>Price Amount</strong>.
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" size="sm" className="mt-1 text-xs font-semibold">
+                  Select File
+                </Button>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSelectedFile(null)
-                  setParsedRows([])
-                }}
-                className="h-7 text-xs text-destructive hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1" /> Replace File
-              </Button>
+          ) : (
+            /* File Selected Header Bar */
+            <div className="bg-card p-3 rounded-lg border border-border flex items-center justify-between">
+              <div className="flex items-center gap-2.5 truncate">
+                <FileSpreadsheet className="h-5 w-5 text-saffron shrink-0" />
+                <div className="truncate">
+                  <p className="text-xs font-bold text-foreground truncate">{selectedFile.name}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {(selectedFile.size / 1024).toFixed(1)} KB • {parsedRows.length} total rows read
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedFile(null)
+                    setParsedRows([])
+                  }}
+                  className="h-7 text-xs text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Replace File
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Live Preview & Verification Section */}
-        {parsedRows.length > 0 && (
-          <div className="space-y-3.5">
-            {/* KPI Summary Banner */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-              <div className="bg-muted/40 p-2.5 rounded-lg border border-border">
-                <span className="text-[11px] text-muted-foreground font-semibold">Total Rows</span>
-                <div className="text-base font-bold text-foreground mt-0.5">{parsedRows.length}</div>
+          {/* Live Preview & Verification Section */}
+          {parsedRows.length > 0 && (
+            <div className="space-y-3">
+              {/* KPI Summary Banner */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                <div className="bg-muted/40 p-2.5 rounded-lg border border-border">
+                  <span className="text-[11px] text-muted-foreground font-semibold">Total Rows</span>
+                  <div className="text-base font-bold text-foreground mt-0.5">{parsedRows.length}</div>
+                </div>
+                <div className="bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/30">
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">To Add (New)</span>
+                  <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-baseline gap-1">
+                    <span>{toAddEntries.length}</span>
+                    {consolidateSameDay && intraDayDuplicateSummary.rowsSaved > 0 && (
+                      <span className="text-[11px] text-blue-600 dark:text-blue-400 font-normal">
+                        (-{intraDayDuplicateSummary.rowsSaved} merged)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-blue-500/10 p-2.5 rounded-lg border border-blue-500/30">
+                  <span className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold">To Merge</span>
+                  <div className="text-base font-bold text-blue-600 dark:text-blue-400 mt-0.5">{toMergeEntries.length}</div>
+                </div>
+                <div className="bg-slate-500/10 p-2.5 rounded-lg border border-slate-500/30">
+                  <span className="text-[11px] text-muted-foreground font-semibold">Skipped</span>
+                  <div className="text-base font-bold text-muted-foreground mt-0.5">{toSkipEntries.length}</div>
+                </div>
+                <div className="bg-saffron-container/30 p-2.5 rounded-lg border border-saffron/40 col-span-2 sm:col-span-1">
+                  <span className="text-[11px] text-saffron font-bold">New Import Value</span>
+                  <div className="text-base font-bold text-saffron mt-0.5">{formatINR(totalValue)}</div>
+                </div>
               </div>
-              <div className="bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/30">
-                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">To Add (New)</span>
-                <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{toAddEntries.length}</div>
-              </div>
-              <div className="bg-blue-500/10 p-2.5 rounded-lg border border-blue-500/30">
-                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold">To Merge</span>
-                <div className="text-base font-bold text-blue-600 dark:text-blue-400 mt-0.5">{toMergeEntries.length}</div>
-              </div>
-              <div className="bg-slate-500/10 p-2.5 rounded-lg border border-slate-500/30">
-                <span className="text-[11px] text-muted-foreground font-semibold">Skipped</span>
-                <div className="text-base font-bold text-muted-foreground mt-0.5">{toSkipEntries.length}</div>
-              </div>
-              <div className="bg-saffron-container/30 p-2.5 rounded-lg border border-saffron/40 col-span-2 sm:col-span-1">
-                <span className="text-[11px] text-saffron font-bold">New Import Value</span>
-                <div className="text-base font-bold text-saffron mt-0.5">{formatINR(totalValue)}</div>
-              </div>
-            </div>
 
-            {/* Smart Conflict / Duplicate Resolution Notice */}
-            {duplicateEntries.length > 0 && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/40 rounded-lg space-y-2">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              {/* Same-Day Multiple Deliveries Consolidation Option */}
+              {intraDayDuplicateSummary.duplicateRowsCount > 0 && (
+                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+                      <Merge className="h-4 w-4" />
+                    </div>
                     <div>
-                      <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                        {duplicateEntries.length} Duplicate / Matching Entries Detected in Ledger
-                      </p>
-                      <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 mt-0.5">
-                        These items already have records on the same date with the same vendor. Choose how each should be handled:
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-blue-950 dark:text-blue-100">
+                          Intra-Day Multiple Deliveries Detected ({intraDayDuplicateSummary.duplicateGroups} item batches, {intraDayDuplicateSummary.duplicateRowsCount} entries)
+                        </span>
+                        <Badge variant="outline" className="text-[10px] bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-500/40 font-semibold">
+                          Zero Data Loss
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-blue-800/90 dark:text-blue-300/80 mt-0.5">
+                        Multiple shipments of the same item from the same vendor on the same day can be merged into 1 clean daily row (quantities & total costs are 100% summed).
                       </p>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                    <span className="text-[11px] text-muted-foreground font-medium mr-1">Bulk Action:</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleBulkAction("skip")}
-                      className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-amber-500/40 text-amber-900 dark:text-amber-200 font-medium"
-                    >
-                      <Ban className="h-3 w-3 mr-1 text-rose-500" /> Skip All
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleBulkAction("new")}
-                      className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-emerald-500/40 text-emerald-800 dark:text-emerald-300 font-medium"
-                    >
-                      <Plus className="h-3 w-3 mr-1 text-emerald-500" /> Add All as New
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleBulkAction("merge")}
-                      className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-blue-500/40 text-blue-800 dark:text-blue-300 font-medium"
-                    >
-                      <Merge className="h-3 w-3 mr-1 text-blue-500" /> Merge All
-                    </Button>
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <label className="flex items-center gap-2 cursor-pointer bg-card px-3 py-1.5 rounded-md border border-blue-500/40 shadow-xs hover:bg-muted/40 transition-colors">
+                      <Checkbox
+                        checked={consolidateSameDay}
+                        onCheckedChange={(checked) => setConsolidateSameDay(Boolean(checked))}
+                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                      />
+                      <span className="text-xs font-semibold text-foreground">
+                        {consolidateSameDay
+                          ? `Consolidate (Saves ${intraDayDuplicateSummary.rowsSaved} rows)`
+                          : "Keep Separate Deliveries"}
+                      </span>
+                    </label>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Preview Table with Vendor Name first, then Item Name */}
-            <div className="border border-border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
-              <Table>
-                <TableHeader className="bg-table-header sticky top-0 z-10">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs font-semibold text-left">Action / Status</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Date</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Vendor Name</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Item Name</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Quantity</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Unit</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Rate (₹)</TableHead>
-                    <TableHead className="text-xs font-semibold text-left">Total (₹)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {parsedRows.map((row) => (
-                    <TableRow
-                      key={row.rowId}
-                      className={
-                        !row.isValid
-                          ? "bg-destructive/5 hover:bg-destructive/10"
-                          : row.isDuplicate
-                          ? "bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70"
-                          : "hover:bg-muted/40"
-                      }
-                    >
-                      {/* Action / Resolution Cell */}
-                      <TableCell className="text-xs text-left whitespace-nowrap">
-                        {!row.isValid ? (
-                          <Badge variant="destructive" className="text-[10px]" title={row.validationError}>
-                            {row.validationError || "Error"}
-                          </Badge>
-                        ) : !row.isDuplicate ? (
-                          <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/40 bg-emerald-500/10">
-                            New Entry
-                          </Badge>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleSetRowAction(row.rowId, "new")}
-                              title="Add as a new separate row on this date"
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                                row.action === "new"
-                                  ? "bg-emerald-600 text-white shadow-xs"
-                                  : "bg-muted text-muted-foreground hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-700"
-                              }`}
-                            >
-                              + New Row
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSetRowAction(row.rowId, "merge")}
-                              title={`Merge quantity: existing ${row.existingQty} + new ${row.quantity} ${row.unit}`}
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                                row.action === "merge"
-                                  ? "bg-blue-600 text-white shadow-xs"
-                                  : "bg-muted text-muted-foreground hover:bg-blue-100 dark:hover:bg-blue-950 hover:text-blue-700"
-                              }`}
-                            >
-                              Merge (+{row.quantity})
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSetRowAction(row.rowId, "skip")}
-                              title="Do not import this row"
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                                row.action === "skip"
-                                  ? "bg-rose-600 text-white shadow-xs"
-                                  : "bg-muted text-muted-foreground hover:bg-rose-100 dark:hover:bg-rose-950 hover:text-rose-700"
-                              }`}
-                            >
-                              Skip
-                            </button>
-                          </div>
-                        )}
-                      </TableCell>
+              {/* Smart Conflict / Duplicate Resolution Notice */}
+              {duplicateEntries.length > 0 && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/40 rounded-lg space-y-2">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                          {duplicateEntries.length} Duplicate / Matching Entries Detected in Ledger
+                        </p>
+                        <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 mt-0.5">
+                          These items already have records on the same date with the same vendor. Choose how each should be handled:
+                        </p>
+                      </div>
+                    </div>
 
-                      <TableCell className="text-xs text-left font-medium">
-                        {formatDateDDMMYYYY(row.purchaseDate)}
-                      </TableCell>
-                      <TableCell className="text-xs font-semibold text-foreground text-left">
-                        {row.vendorName}
-                      </TableCell>
-                      <TableCell className="text-xs font-bold text-foreground text-left">
-                        <div>
-                          <span>{row.itemName}</span>
-                          {row.isDuplicate && (
-                            <p className="text-[10px] font-normal text-amber-700 dark:text-amber-300 mt-0.5">
-                              {row.duplicateReason}
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs font-semibold text-foreground text-left">
-                        {row.quantity}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground text-left">
-                        {row.unit}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground text-left">
-                        {formatINR(row.rate)}
-                      </TableCell>
-                      <TableCell className="text-xs font-bold text-saffron text-left">
-                        {formatINR(row.total)}
-                      </TableCell>
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                      <span className="text-[11px] text-muted-foreground font-medium mr-1">Bulk Action:</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleBulkAction("skip")}
+                        className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-amber-500/40 text-amber-900 dark:text-amber-200 font-medium"
+                      >
+                        <Ban className="h-3 w-3 mr-1 text-rose-500" /> Skip All
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleBulkAction("new")}
+                        className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-emerald-500/40 text-emerald-800 dark:text-emerald-300 font-medium"
+                      >
+                        <Plus className="h-3 w-3 mr-1 text-emerald-500" /> Add All as New
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleBulkAction("merge")}
+                        className="text-[11px] h-7 px-2.5 bg-background hover:bg-muted border-blue-500/40 text-blue-800 dark:text-blue-300 font-medium"
+                      >
+                        <Merge className="h-3 w-3 mr-1 text-blue-500" /> Merge All
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Table with constrained height so footer is always visible */}
+              <div className="border border-border rounded-lg overflow-hidden max-h-56 sm:max-h-60 overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-table-header sticky top-0 z-10">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs font-semibold text-left">Action / Status</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Date</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Vendor Name</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Item Name</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Quantity</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Unit</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Rate (₹)</TableHead>
+                      <TableHead className="text-xs font-semibold text-left">Total (₹)</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        )}
+                  </TableHeader>
+                  <TableBody>
+                    {effectiveRows.map((row) => (
+                      <TableRow
+                        key={row.rowId}
+                        className={
+                          !row.isValid
+                            ? "bg-destructive/5 hover:bg-destructive/10"
+                            : row.isMergedIntraDay
+                            ? "bg-blue-50/40 dark:bg-blue-950/20 hover:bg-blue-50/70"
+                            : row.isDuplicate
+                            ? "bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70"
+                            : "hover:bg-muted/40"
+                        }
+                      >
+                        {/* Action / Resolution Cell */}
+                        <TableCell className="text-xs text-left whitespace-nowrap">
+                          {!row.isValid ? (
+                            <Badge variant="destructive" className="text-[10px]" title={row.validationError}>
+                              {row.validationError || "Error"}
+                            </Badge>
+                          ) : row.isMergedIntraDay ? (
+                            <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-500/40 bg-blue-500/10 font-medium" title={row.mergedBreakdown}>
+                              Merged ({row.mergedCount} deliveries)
+                            </Badge>
+                          ) : !row.isDuplicate ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/40 bg-emerald-500/10">
+                              New Entry
+                            </Badge>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleSetRowAction(row.rowId, "new")}
+                                title="Add as a new separate row on this date"
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                                  row.action === "new"
+                                    ? "bg-emerald-600 text-white shadow-xs"
+                                    : "bg-muted text-muted-foreground hover:bg-emerald-100 dark:hover:bg-emerald-950 hover:text-emerald-700"
+                                }`}
+                              >
+                                + New Row
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSetRowAction(row.rowId, "merge")}
+                                title={`Merge quantity: existing ${row.existingQty} + new ${row.quantity} ${row.unit}`}
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                                  row.action === "merge"
+                                    ? "bg-blue-600 text-white shadow-xs"
+                                    : "bg-muted text-muted-foreground hover:bg-blue-100 dark:hover:bg-blue-950 hover:text-blue-700"
+                                }`}
+                              >
+                                Merge (+{row.quantity})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSetRowAction(row.rowId, "skip")}
+                                title="Do not import this row"
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                                  row.action === "skip"
+                                    ? "bg-rose-600 text-white shadow-xs"
+                                    : "bg-muted text-muted-foreground hover:bg-rose-100 dark:hover:bg-rose-950 hover:text-rose-700"
+                                }`}
+                              >
+                                Skip
+                              </button>
+                            </div>
+                          )}
+                        </TableCell>
 
-        <DialogFooter className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <TableCell className="text-xs text-left font-medium">
+                          {formatDateDDMMYYYY(row.purchaseDate)}
+                        </TableCell>
+                        <TableCell className="text-xs font-semibold text-foreground text-left">
+                          {row.vendorName}
+                        </TableCell>
+                        <TableCell className="text-xs font-bold text-foreground text-left">
+                          <div>
+                            <span>{row.itemName}</span>
+                            {row.isMergedIntraDay && (
+                              <p className="text-[10px] font-normal text-blue-700 dark:text-blue-300 mt-0.5">
+                                Deliveries: {row.mergedBreakdown}
+                              </p>
+                            )}
+                            {row.isDuplicate && (
+                              <p className="text-[10px] font-normal text-amber-700 dark:text-amber-300 mt-0.5">
+                                {row.duplicateReason}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs font-semibold text-foreground text-left">
+                          {row.quantity}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground text-left">
+                          {row.unit}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground text-left">
+                          {formatINR(row.rate)}
+                        </TableCell>
+                        <TableCell className="text-xs font-bold text-saffron text-left">
+                          {formatINR(row.total)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Pinned Dialog Footer - Always visible on screen without scrolling */}
+        <DialogFooter className="shrink-0 pt-2.5 border-t border-border mt-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card z-10">
           <div className="text-xs text-muted-foreground">
             {parsedRows.length > 0 && (
               <span>
                 Applying: <strong>{toAddEntries.length}</strong> new, <strong>{toMergeEntries.length}</strong> merged, <strong>{toSkipEntries.length}</strong> skipped.
+                {consolidateSameDay && intraDayDuplicateSummary.rowsSaved > 0 && (
+                  <span className="text-blue-600 dark:text-blue-400 font-medium ml-1">
+                    (Shrunk {intraDayDuplicateSummary.duplicateRowsCount} intra-day entries into {intraDayDuplicateSummary.duplicateRowsCount - intraDayDuplicateSummary.rowsSaved} daily rows)
+                  </span>
+                )}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button type="button" variant="outline" onClick={handleClose}>
               Cancel
             </Button>

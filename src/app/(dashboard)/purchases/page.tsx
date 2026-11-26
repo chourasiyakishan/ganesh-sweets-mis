@@ -24,6 +24,7 @@ import {
 import * as XLSX from "xlsx"
 import { ImportPurchasesModal } from "./import-purchases-modal"
 import { BulkDeleteModal } from "./bulk-delete-modal"
+import { ConsolidatePurchasesModal } from "./consolidate-modal"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,7 +37,7 @@ import { Badge } from "@/components/ui/badge"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { initialPurchases, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
 import { ITEMS_STORAGE_KEY, VENDORS_STORAGE_KEY } from "@/lib/data-management"
-import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb, deletePurchasesFromDb } from "@/lib/supabase/data-service"
+import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb, deletePurchasesFromDb, savePurchasesToDb } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
@@ -322,6 +323,7 @@ export default function PurchasesPage() {
 
   // Import Modal State
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isConsolidateOpen, setIsConsolidateOpen] = useState(false)
 
   // Bulk Delete Modal State & Table Row Selection
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
@@ -974,6 +976,17 @@ export default function PurchasesPage() {
     toast.success(`Successfully deleted ${idsToDelete.length} purchase entries`)
   }
 
+  // --- Same-Day Intraday Consolidation Handler ---
+  const handleConsolidatePurchases = async (
+    newPurchases: PurchaseEntry[],
+    mergedGroupsCount: number,
+    rowsSavedCount: number
+  ) => {
+    updatePurchases(newPurchases)
+    await savePurchasesToDb(newPurchases)
+    toast.success(`Consolidated ${rowsSavedCount} same-day duplicate deliveries across ${mergedGroupsCount} batches! Saved ${rowsSavedCount} rows with zero data loss.`)
+  }
+
   const selectedRowSet = useMemo(() => new Set(selectedRowIds), [selectedRowIds])
 
   const handleToggleRowSelection = (id: string) => {
@@ -1229,6 +1242,15 @@ export default function PurchasesPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-8 text-xs border-border text-foreground hover:bg-muted font-medium">
               <Download className="h-3.5 w-3.5 mr-1.5 text-saffron" /> Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsConsolidateOpen(true)}
+              className="h-8 text-xs border-blue-500/40 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 font-semibold"
+              title="Consolidate multiple same-day deliveries from same vendor into single rows with zero data loss"
+            >
+              <Merge className="h-3.5 w-3.5 mr-1.5" /> Merge Same-Day
             </Button>
             <Button
               variant="outline"
@@ -2178,6 +2200,14 @@ export default function PurchasesPage() {
         availableVendors={vendors}
         availableFYs={availableFinancialYears}
         onDeletePurchases={handleBulkDeletePurchases}
+      />
+
+      {/* Modal: Same-Day Deliveries Consolidation (Zero Data Loss) */}
+      <ConsolidatePurchasesModal
+        isOpen={isConsolidateOpen}
+        onClose={() => setIsConsolidateOpen(false)}
+        purchases={purchases}
+        onConsolidate={handleConsolidatePurchases}
       />
     </div>
   )
