@@ -277,6 +277,17 @@ export async function savePurchaseToDb(entry: PurchaseEntry): Promise<void> {
   }
 }
 
+export async function deletePurchasesFromDb(ids: string[]): Promise<void> {
+  if (isSupabaseConfigured() && ids.length > 0) {
+    try {
+      const supabase = createClient()
+      await supabase.from("purchases").delete().in("id", ids)
+    } catch (e) {
+      console.warn("Supabase deletePurchases error:", e)
+    }
+  }
+}
+
 // --- EXPENSES SERVICE ---
 export async function fetchExpenses(): Promise<any[]> {
   if (typeof window !== "undefined") {

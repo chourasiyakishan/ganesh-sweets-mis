@@ -19,9 +19,12 @@ import {
   RotateCcw,
   AlertTriangle,
   Merge,
+  ShieldAlert,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { ImportPurchasesModal } from "./import-purchases-modal"
+import { BulkDeleteModal } from "./bulk-delete-modal"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -33,7 +36,7 @@ import { Badge } from "@/components/ui/badge"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { initialPurchases, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
 import { ITEMS_STORAGE_KEY, VENDORS_STORAGE_KEY } from "@/lib/data-management"
-import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb } from "@/lib/supabase/data-service"
+import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb, deletePurchasesFromDb } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
@@ -262,6 +265,11 @@ export default function PurchasesPage() {
 
   // Import Modal State
   const [isImportOpen, setIsImportOpen] = useState(false)
+
+  // Bulk Delete Modal State & Table Row Selection
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
+  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([])
+  const [isBatchConfirmOpen, setIsBatchConfirmOpen] = useState(false)
 
   // Note Viewer Modal State
   const [notePurchase, setNotePurchase] = useState<PurchaseEntry | null>(null)
@@ -816,13 +824,51 @@ export default function PurchasesPage() {
     toast.success(`Purchase entry for ${selectedItemName} updated!`)
   }
 
-  const handleDeletePurchase = (id: string, itemName: string) => {
+  const handleDeletePurchase = async (id: string, itemName: string) => {
     if (confirm(`Are you sure you want to delete purchase entry for "${itemName}"?`)) {
       const nextPurchases = purchases.filter((p) => p.id !== id)
       updatePurchases(nextPurchases)
+      await deletePurchasesFromDb([id])
+      setSelectedRowIds((prev) => prev.filter((i) => i !== id))
       toast.success("Purchase entry removed")
     }
   }
+
+  // --- Bulk Delete Operations ---
+  const handleBulkDeletePurchases = async (idsToDelete: string[]) => {
+    if (idsToDelete.length === 0) return
+    const idsSet = new Set(idsToDelete)
+    const nextPurchases = purchases.filter((p) => !idsSet.has(p.id))
+    updatePurchases(nextPurchases)
+    await deletePurchasesFromDb(idsToDelete)
+    setSelectedRowIds((prev) => prev.filter((id) => !idsSet.has(id)))
+    setIsBatchConfirmOpen(false)
+    toast.success(`Successfully deleted ${idsToDelete.length} purchase entries`)
+  }
+
+  const handleToggleRowSelection = (id: string) => {
+    setSelectedRowIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    )
+  }
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = filteredAndSortedPurchases.map((p) => p.id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedRowIds.includes(id))
+    if (allSelected) {
+      setSelectedRowIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
+    } else {
+      const combined = new Set([...selectedRowIds, ...visibleIds])
+      setSelectedRowIds(Array.from(combined))
+    }
+  }
+
+  const selectedTotalAmount = useMemo(() => {
+    return selectedRowIds.reduce((sum, id) => {
+      const found = purchases.find((p) => p.id === id)
+      return sum + (found?.total || 0)
+    }, 0)
+  }, [selectedRowIds, purchases])
 
   const handleExportCSV = () => {
     if (filteredAndSortedPurchases.length === 0) {
@@ -1037,8 +1083,8 @@ export default function PurchasesPage() {
               <ListPlus className="h-3.5 w-3.5 mr-1.5" /> Bulk Purchase Entry
             </Button>
           </div>
-          {/* Line 2: Import aur Export */}
-          <div className="flex items-center gap-2">
+          {/* Line 2: Import, Export aur Bulk Delete */}
+          <div className="flex items-center gap-2 flex-wrap sm:justify-end">
             <Button
               variant="outline"
               size="sm"
@@ -1049,6 +1095,15 @@ export default function PurchasesPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-8 text-xs border-border text-foreground hover:bg-muted font-medium">
               <Download className="h-3.5 w-3.5 mr-1.5 text-saffron" /> Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteOpen(true)}
+              className="h-8 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-semibold"
+              title="Bulk delete incorrect entries by vendor, item, date or month"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Bulk Delete
             </Button>
           </div>
         </div>
@@ -1227,6 +1282,18 @@ export default function PurchasesPage() {
         <Table>
           <TableHeader className="bg-table-header">
             <TableRow className="hover:bg-transparent">
+              {/* Checkbox: Select All Visible */}
+              <TableHead className="w-10 text-center px-3">
+                <Checkbox
+                  checked={
+                    filteredAndSortedPurchases.length > 0 &&
+                    filteredAndSortedPurchases.every((p) => selectedRowIds.includes(p.id))
+                  }
+                  onCheckedChange={handleToggleSelectAllVisible}
+                  aria-label="Select all visible entries"
+                />
+              </TableHead>
+
               {/* 1. Date */}
               <TableHead
                 onClick={() => handleSort("purchaseDate")}
@@ -1317,7 +1384,7 @@ export default function PurchasesPage() {
           <TableBody>
             {groupedPurchasesByMonth.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-left py-10 text-muted-foreground text-sm">
+                <TableCell colSpan={10} className="text-left py-10 text-muted-foreground text-sm">
                   No purchase entries found matching filter criteria.
                 </TableCell>
               </TableRow>
@@ -1327,13 +1394,13 @@ export default function PurchasesPage() {
                   {/* Clean Blank Space Divider between Month Blocks */}
                   {groupIdx > 0 && (
                     <TableRow className="hover:bg-transparent border-none">
-                      <TableCell colSpan={9} className="h-6 py-2 border-none bg-transparent" />
+                      <TableCell colSpan={10} className="h-6 py-2 border-none bg-transparent" />
                     </TableRow>
                   )}
 
                   {/* Month Heading Row */}
                     <TableRow className="bg-saffron-container/40 dark:bg-saffron/20 hover:bg-saffron-container/50 border-t-4 border-t-saffron border-b-2 border-b-saffron/30 transition-colors shadow-2xs">
-                      <TableCell colSpan={9} className="py-3 px-4 text-left">
+                      <TableCell colSpan={10} className="py-3 px-4 text-left">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
                             <div className="p-1.5 rounded-md bg-saffron/20 text-saffron dark:text-saffron-light">
@@ -1362,7 +1429,21 @@ export default function PurchasesPage() {
 
                     {/* Purchase Rows for this Month */}
                     {group.items.map((p) => (
-                      <TableRow key={p.id} className="hover:bg-muted/50 transition-colors">
+                      <TableRow
+                        key={p.id}
+                        className={`hover:bg-muted/50 transition-colors ${
+                          selectedRowIds.includes(p.id) ? "bg-primary/5 dark:bg-primary/10" : ""
+                        }`}
+                      >
+                        {/* Checkbox for row selection */}
+                        <TableCell className="w-10 text-center px-3">
+                          <Checkbox
+                            checked={selectedRowIds.includes(p.id)}
+                            onCheckedChange={() => handleToggleRowSelection(p.id)}
+                            aria-label={`Select ${p.itemName}`}
+                          />
+                        </TableCell>
+
                         {/* 1. Date (DD-MM-YYYY format) */}
                         <TableCell className="text-xs font-semibold text-foreground text-left whitespace-nowrap">
                           {formatDateDDMMYYYY(p.purchaseDate)}
@@ -1829,6 +1910,92 @@ export default function PurchasesPage() {
         availableItems={sortedItems}
         availableVendors={vendors}
         existingPurchases={purchases}
+      />
+
+      {/* Floating Selection Action Bar */}
+      {selectedRowIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-zinc-700/50 dark:border-zinc-300 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold">
+            <span className="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-primary text-white text-[11px] sm:text-xs font-bold">
+              {selectedRowIds.length}
+            </span>
+            <span>Selected</span>
+            <span className="text-zinc-400 dark:text-zinc-600 font-normal">({formatINR(selectedTotalAmount)})</span>
+          </div>
+
+          <div className="h-4 w-px bg-zinc-700 dark:bg-zinc-300" />
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs text-zinc-300 hover:text-white hover:bg-zinc-800 dark:text-zinc-600 dark:hover:text-zinc-900 dark:hover:bg-zinc-200 cursor-pointer"
+              onClick={() => setSelectedRowIds([])}
+            >
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 text-xs font-semibold gap-1.5 shadow-sm cursor-pointer"
+              onClick={() => setIsBatchConfirmOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete Selected ({selectedRowIds.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog: Confirm Deletion of Selected Checkbox Rows */}
+      <Dialog open={isBatchConfirmOpen} onOpenChange={setIsBatchConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="h-5 w-5" /> Confirm Batch Deletion
+            </DialogTitle>
+            <DialogDescription className="text-xs pt-1">
+              Are you sure you want to delete the selected <strong>{selectedRowIds.length}</strong> purchase entries? This action will permanently remove them from the ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 my-2 space-y-2">
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-muted-foreground">Total Entries Selected:</span>
+              <span className="text-foreground">{selectedRowIds.length} rows</span>
+            </div>
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-muted-foreground">Total Combined Amount:</span>
+              <span className="text-destructive font-bold">{formatINR(selectedTotalAmount)}</span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" size="sm" onClick={() => setIsBatchConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => handleBulkDeletePurchases(selectedRowIds)}
+              className="font-semibold gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" />
+              Yes, Delete {selectedRowIds.length} Entries
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Criteria-Based Bulk Delete */}
+      <BulkDeleteModal
+        isOpen={isBulkDeleteOpen}
+        onClose={() => setIsBulkDeleteOpen(false)}
+        purchases={purchases}
+        availableItems={sortedItems}
+        availableVendors={vendors}
+        availableFYs={availableFinancialYears}
+        onDeletePurchases={handleBulkDeletePurchases}
       />
     </div>
   )
