@@ -72,8 +72,8 @@ const navSections: NavSection[] = [
   {
     label: "Utilities",
     items: [
-      { title: "Weight-Price Calc", href: "/calculators/weight-price", icon: Scale },
-      { title: "Profit & Loss Calc", href: "/calculators/profit-loss", icon: TrendingUp, roles: ["Owner", "Accountant"] },
+      { title: "Weight-Price Calculator", href: "/calculators/weight-price", icon: Scale },
+      { title: "Profit-Loss Calculator", href: "/calculators/profit-loss", icon: TrendingUp, roles: ["Owner", "Accountant"] },
       { title: "Bulk Recipe Scaler", href: "/calculators/bulk-recipe", icon: ChefHat, roles: ["Owner", "Manager"] },
     ],
   },

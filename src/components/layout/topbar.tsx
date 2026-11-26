@@ -326,7 +326,7 @@ export function Topbar() {
       group: "Operations",
     },
     {
-      name: "Weight-Price Counter Calculator",
+      name: "Weight-Price Calculator",
       desc: "Quick counter billing calculation for variable sweet weights",
       path: "/calculators/weight-price",
       icon: Scale,
@@ -334,7 +334,7 @@ export function Topbar() {
       group: "Calculators",
     },
     {
-      name: "Profit & Loss Calculator",
+      name: "Profit-Loss Calculator",
       desc: "Batch margin analysis and profit estimation calculator",
       path: "/calculators/profit-loss",
       icon: TrendingUp,
@@ -605,7 +605,7 @@ export function Topbar() {
                 <CommandItem onSelect={() => navigateTo("/calculators/weight-price")}>
                   <Scale className="h-4 w-4 mr-2 text-saffron" />
                   <div className="flex-1">
-                    <p className="font-medium text-foreground">Weight-Price Counter Calculator</p>
+                    <p className="font-medium text-foreground">Weight-Price Calculator</p>
                     <p className="text-xs text-muted-foreground">Instant Counter Billing Calculator for Variable Sweet Weights</p>
                   </div>
                   <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-60 ml-2" />
@@ -613,7 +613,7 @@ export function Topbar() {
                 <CommandItem onSelect={() => navigateTo("/calculators/profit-loss")}>
                   <TrendingUp className="h-4 w-4 mr-2 text-deep-green" />
                   <div className="flex-1">
-                    <p className="font-medium text-foreground">Profit & Loss Calculator</p>
+                    <p className="font-medium text-foreground">Profit-Loss Calculator</p>
                     <p className="text-xs text-muted-foreground">Product Margin & Batch Profit Estimation Calculator</p>
                   </div>
                   <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-60 ml-2" />

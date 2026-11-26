@@ -52,7 +52,7 @@ export default function ProfitLossCalculatorPage() {
       <div className="flex items-center justify-between bg-card p-4 sm:p-5 rounded-xl border border-border shadow-xs">
         <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2.5">
           <TrendingUp className="h-6 w-6 text-deep-green" />
-          Profit & Loss Calculator
+          Profit-Loss Calculator
         </h1>
         <Button
           variant="outline"

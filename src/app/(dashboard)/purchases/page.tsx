@@ -17,6 +17,8 @@ import {
   Layers,
   ListPlus,
   RotateCcw,
+  AlertTriangle,
+  Merge,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { ImportPurchasesModal } from "./import-purchases-modal"
@@ -606,6 +608,45 @@ export default function PurchasesPage() {
     return filteredAndSortedPurchases.reduce((acc, curr) => acc + curr.total, 0)
   }, [filteredAndSortedPurchases])
 
+  // --- Duplicate Detection for Manual Add Purchase Form ---
+  const existingMatchingPurchase = useMemo(() => {
+    if (!purchaseDate || !selectedItemName || !selectedVendorName) return null
+    return purchases.find(
+      (p) =>
+        p.purchaseDate === purchaseDate &&
+        p.itemName.trim().toLowerCase() === selectedItemName.trim().toLowerCase() &&
+        p.vendorName.trim().toLowerCase() === selectedVendorName.trim().toLowerCase()
+    )
+  }, [purchases, purchaseDate, selectedItemName, selectedVendorName])
+
+  // Merge manual entry quantity into existing record on the same date
+  const handleMergeManualPurchase = (targetId: string) => {
+    if (!qty || parseFloat(qty) <= 0) {
+      toast.error("Please enter a valid quantity to merge")
+      return
+    }
+    const additional = parseFloat(qty)
+    const nextPurchases = purchases.map((p) => {
+      if (p.id === targetId) {
+        const newQty = (p.quantity || 0) + additional
+        const newTotal = newQty * (p.rate || 0)
+        const updatedRemarks = p.remarks
+          ? `${p.remarks} | Merged +${additional} ${p.unit}`
+          : `Merged +${additional} ${p.unit}`
+        return {
+          ...p,
+          quantity: newQty,
+          total: newTotal,
+          remarks: remarks.trim() ? `${updatedRemarks} (${remarks.trim()})` : updatedRemarks,
+        }
+      }
+      return p
+    })
+    updatePurchases(nextPurchases)
+    setIsAddOpen(false)
+    toast.success(`Merged +${additional} ${unit} into existing entry (${formatDateDDMMYYYY(purchaseDate)})`)
+  }
+
   // --- Handlers for Open Modals ---
   const handleOpenAddModal = () => {
     const defaultItem = sortedItems[0]?.name || "Pure Cow Ghee"
@@ -800,11 +841,40 @@ export default function PurchasesPage() {
     toast.success(`Exported ${filteredAndSortedPurchases.length} purchase entries to Excel file`)
   }
 
-  const handleImportPurchases = (newEntries: PurchaseEntry[]) => {
-    const nextPurchases = [...newEntries, ...purchases]
+  const handleImportPurchases = (
+    newEntries: PurchaseEntry[],
+    mergedEntries: { existingId: string; additionalQty: number; remarks?: string }[] = []
+  ) => {
+    let updatedPurchases = [...purchases]
+
+    if (mergedEntries.length > 0) {
+      updatedPurchases = updatedPurchases.map((p) => {
+        const merge = mergedEntries.find((m) => m.existingId === p.id)
+        if (merge) {
+          const newQty = (p.quantity || 0) + merge.additionalQty
+          const newTotal = newQty * (p.rate || 0)
+          const updatedRemarks = p.remarks
+            ? `${p.remarks} | Merged +${merge.additionalQty} ${p.unit}`
+            : `Merged +${merge.additionalQty} ${p.unit}`
+          return {
+            ...p,
+            quantity: newQty,
+            total: newTotal,
+            remarks: updatedRemarks,
+          }
+        }
+        return p
+      })
+    }
+
+    const nextPurchases = [...newEntries, ...updatedPurchases]
     updatePurchases(nextPurchases)
     setSelectedFY("ALL")
-    toast.success(`Imported ${newEntries.length} purchase entries successfully`)
+
+    const msgs: string[] = []
+    if (newEntries.length > 0) msgs.push(`${newEntries.length} new entries added`)
+    if (mergedEntries.length > 0) msgs.push(`${mergedEntries.length} entries merged with existing ledger`)
+    toast.success(`Import complete: ${msgs.join(", ") || "No changes"}`)
   }
 
   const renderSortIcon = (field: SortField) => {
@@ -1501,12 +1571,40 @@ export default function PurchasesPage() {
               <Input placeholder="Optional quality inspection notes..." value={remarks} onChange={(e) => setRemarks(e.target.value)} />
             </div>
 
+            {/* Smart Duplicate Warning & Merge Option */}
+            {existingMatchingPurchase && (
+              <div className="p-3 rounded-lg border border-amber-300 dark:border-amber-700/80 bg-amber-50/80 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 text-xs space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-bold text-amber-900 dark:text-amber-100">Notice: Existing Purchase on this Date</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">
+                      {formatDateDDMMYYYY(existingMatchingPurchase.purchaseDate)} ko <strong>{existingMatchingPurchase.vendorName}</strong> se <strong>{existingMatchingPurchase.itemName}</strong> ({existingMatchingPurchase.quantity} {existingMatchingPurchase.unit} @ {formatINR(existingMatchingPurchase.rate)}) pehle se darj hai.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200/80 dark:border-amber-800/60">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleMergeManualPurchase(existingMatchingPurchase.id)}
+                    className="text-[11px] h-7 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/60 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-100 border-amber-300 font-semibold cursor-pointer"
+                  >
+                    <Merge className="h-3 w-3 mr-1 text-amber-700 dark:text-amber-300" />
+                    Merge: Add +{qty || 0} {unit} into Existing Entry
+                  </Button>
+                  <span className="text-[10px] text-muted-foreground">or click below to add as a new separate row</span>
+                </div>
+              </div>
+            )}
+
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" className="bg-primary hover:bg-saffron-dark text-white font-semibold">
-                Save Entry
+                {existingMatchingPurchase ? "Save as New Row" : "Save Entry"}
               </Button>
             </DialogFooter>
           </form>
@@ -1607,6 +1705,7 @@ export default function PurchasesPage() {
         onImport={handleImportPurchases}
         availableItems={sortedItems}
         availableVendors={vendors}
+        existingPurchases={purchases}
       />
     </div>
   )

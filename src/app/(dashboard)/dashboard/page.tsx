@@ -20,6 +20,8 @@ import {
   FileText,
   Download,
   Printer,
+  AlertTriangle,
+  Merge,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -185,6 +187,59 @@ export default function DashboardPage() {
       setUnit(item.unit)
       setRate(item.currentPrice.toString())
     }
+  }
+
+  // Duplicate detection for today's quick purchase
+  const quickMatchingPurchase = useMemo(() => {
+    if (!selectedItem || !selectedVendor) return null
+    const item = itemsList.find((i) => i.id === selectedItem)
+    const vendor = vendorsList.find((v) => v.id === selectedVendor)
+    const itemName = item?.name || selectedItem
+    const vendorName = vendor?.name || selectedVendor
+    const todayStr = new Date().toISOString().split("T")[0]
+    return purchasesList.find(
+      (p) =>
+        p.purchaseDate === todayStr &&
+        p.itemName.trim().toLowerCase() === itemName.trim().toLowerCase() &&
+        p.vendorName.trim().toLowerCase() === vendorName.trim().toLowerCase()
+    )
+  }, [selectedItem, selectedVendor, itemsList, vendorsList, purchasesList])
+
+  const handleQuickPurchaseMerge = async (existingId: string) => {
+    if (!quantity || parseFloat(quantity) <= 0) {
+      toast.error("Please enter a valid quantity to merge")
+      return
+    }
+    const additional = parseFloat(quantity)
+    const updatedList = purchasesList.map((p) => {
+      if (p.id === existingId) {
+        const newQty = (p.quantity || 0) + additional
+        const newTotal = newQty * (p.rate || 0)
+        return {
+          ...p,
+          quantity: newQty,
+          total: newTotal,
+          remarks: p.remarks ? `${p.remarks} | Merged +${additional} ${p.unit}` : `Merged +${additional} ${p.unit}`,
+        }
+      }
+      return p
+    })
+    setPurchasesList(updatedList)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList))
+      window.dispatchEvent(new Event("purchases-updated"))
+    } catch (e) {
+      console.error(e)
+    }
+    const mergedItem = updatedList.find((p) => p.id === existingId)
+    if (mergedItem) {
+      await savePurchaseToDb(mergedItem)
+    }
+    toast.success(`Merged +${additional} ${unit} into today's existing purchase entry`)
+    setSelectedItem("")
+    setSelectedVendor("")
+    setQuantity("")
+    setLotNumber("")
   }
 
   const handleQuickPurchaseSubmit = async (e: React.FormEvent) => {
@@ -702,6 +757,34 @@ export default function DashboardPage() {
                             </div>
                           </div>
 
+                          {/* Quick Conflict Warning */}
+                          {quickMatchingPurchase && (
+                            <div className="p-3 rounded-lg border border-amber-300 dark:border-amber-700/80 bg-amber-50/80 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 text-xs space-y-2 mt-3">
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                                <div className="flex-1">
+                                  <p className="font-bold text-amber-900 dark:text-amber-100">Notice: Aaj is vendor se entry pehle se darj hai</p>
+                                  <p className="text-[11px] opacity-90 mt-0.5">
+                                    Aaj <strong>{quickMatchingPurchase.vendorName}</strong> se <strong>{quickMatchingPurchase.itemName}</strong> ({quickMatchingPurchase.quantity} {quickMatchingPurchase.unit} @ {formatINR(quickMatchingPurchase.rate)}) ka record pehle se maujood hai.
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200/80 dark:border-amber-800/60">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleQuickPurchaseMerge(quickMatchingPurchase.id)}
+                                  className="text-[11px] h-7 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/60 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-100 border-amber-300 font-semibold cursor-pointer"
+                                >
+                                  <Merge className="h-3 w-3 mr-1 text-amber-700 dark:text-amber-300" />
+                                  Merge: Add +{quantity || 0} {unit} into Today's Entry
+                                </Button>
+                                <span className="text-[10px] text-muted-foreground">ya neeche click karke alag nayi row save karein</span>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Form Footer with Total Display */}
                           <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-border mt-4">
                             <div className="flex items-center gap-2">
@@ -712,7 +795,7 @@ export default function DashboardPage() {
                             </div>
 
                             <Button type="submit" className="bg-primary hover:bg-saffron-dark text-primary-foreground font-semibold">
-                              <Plus className="h-4 w-4 mr-1.5" /> Save Purchase Record
+                              <Plus className="h-4 w-4 mr-1.5" /> {quickMatchingPurchase ? "Save as New Row" : "Save Purchase Record"}
                             </Button>
                           </div>
                         </form>
