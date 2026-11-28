@@ -118,6 +118,9 @@ export default function ExpensesPage() {
     fetchExpenses().then((data) => {
       if (data && data.length > 0) {
         setExpenses(data)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+        } catch {}
       }
     })
   }, [])
@@ -491,6 +494,7 @@ export default function ExpensesPage() {
 
     const updated = [newEntry, ...expenses]
     updateExpenses(updated)
+    saveExpenseToDb(newEntry)
     setIsAddOpen(false)
     toast.success(`Logged ${newEntry.category} expense: ${formatINR(newEntry.amount)}`)
   }
@@ -517,9 +521,10 @@ export default function ExpensesPage() {
     }
     const monthStr = dateObj.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
 
+    let updatedRecord: ExpenseEntry | null = null
     const updated = expenses.map((e) => {
       if (e.id === editingExpense.id) {
-        return {
+        updatedRecord = {
           ...e,
           expenseDate: formData.expenseDate,
           date: `${day} ${dateObj.toLocaleString("en-IN", { month: "short" })}, 11:30`,
@@ -530,11 +535,15 @@ export default function ExpensesPage() {
           billInvoiceNo: formData.billInvoiceNo.trim() || undefined,
           remarks: formData.remarks.trim() || undefined,
         }
+        return updatedRecord
       }
       return e
     })
 
     updateExpenses(updated)
+    if (updatedRecord) {
+      saveExpenseToDb(updatedRecord)
+    }
     setIsEditOpen(false)
     setEditingExpense(null)
     toast.success("Expense entry updated successfully")

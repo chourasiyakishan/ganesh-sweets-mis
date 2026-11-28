@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge"
 import { formatINR, formatDateDDMMYYYY } from "@/lib/utils"
 import { initialPurchases, PurchaseEntry, Item, Vendor } from "@/lib/mockData"
 import { ITEMS_STORAGE_KEY, VENDORS_STORAGE_KEY } from "@/lib/data-management"
-import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb, deletePurchasesFromDb, savePurchasesToDb } from "@/lib/supabase/data-service"
+import { fetchPurchases, fetchItems, fetchVendors, saveItemToDb, saveVendorToDb, deletePurchasesFromDb, savePurchasesToDb, savePurchaseToDb } from "@/lib/supabase/data-service"
 import { toast } from "sonner"
 
 type SortField = "purchaseDate" | "vendorName" | "itemName" | "quantity" | "unit" | "rate" | "total" | "remarks"
@@ -141,10 +141,13 @@ export default function PurchasesPage() {
   useEffect(() => {
     loadPurchasesFromStorage()
     loadItemsAndVendors()
-    // Also try fetching from Supabase if configured
+    // Always fetch fresh purchases from Supabase and synchronize
     fetchPurchases().then((data) => {
       if (data && data.length > 0) {
         setPurchases(data)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+        } catch {}
       }
     })
   }, [])
@@ -543,6 +546,7 @@ export default function PurchasesPage() {
 
     const nextPurchases = [...newEntries, ...purchases]
     updatePurchases(nextPurchases)
+    savePurchasesToDb(newEntries)
     setIsBulkOpen(false)
 
     // Ensure newly created bulk entries are immediately visible
@@ -779,6 +783,7 @@ export default function PurchasesPage() {
       return
     }
     const additional = parseFloat(qty)
+    let mergedRecord: PurchaseEntry | null = null
     const nextPurchases = purchases.map((p) => {
       if (p.id === targetId) {
         const newQty = (p.quantity || 0) + additional
@@ -786,16 +791,20 @@ export default function PurchasesPage() {
         const updatedRemarks = p.remarks
           ? `${p.remarks} | Merged +${additional} ${p.unit}`
           : `Merged +${additional} ${p.unit}`
-        return {
+        mergedRecord = {
           ...p,
           quantity: newQty,
           total: newTotal,
           remarks: remarks.trim() ? `${updatedRemarks} (${remarks.trim()})` : updatedRemarks,
         }
+        return mergedRecord
       }
       return p
     })
     updatePurchases(nextPurchases)
+    if (mergedRecord) {
+      savePurchaseToDb(mergedRecord)
+    }
     setIsAddOpen(false)
     toast.success(`Merged +${additional} ${unit} into existing entry (${formatDateDDMMYYYY(purchaseDate)})`)
   }
@@ -889,6 +898,7 @@ export default function PurchasesPage() {
 
     const nextPurchases = [newEntry, ...purchases]
     updatePurchases(nextPurchases)
+    savePurchaseToDb(newEntry)
     setIsAddOpen(false)
 
     // Ensure newly created purchase is immediately visible
@@ -929,24 +939,30 @@ export default function PurchasesPage() {
     }
     const monthStr = dateObj.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
 
-    const updated = purchases.map((p) =>
-      p.id === editingPurchase.id
-        ? {
-            ...p,
-            purchaseDate: purchaseDate,
-            monthGroup: monthStr,
-            itemName: selectedItemName,
-            vendorName: selectedVendorName,
-            quantity: parseFloat(qty),
-            unit: unit,
-            rate: parseFloat(rate),
-            total: calculatedTotal,
-            remarks: remarks.trim() || undefined,
-          }
-        : p
-    )
+    let updatedRecord: PurchaseEntry | null = null
+    const updated = purchases.map((p) => {
+      if (p.id === editingPurchase.id) {
+        updatedRecord = {
+          ...p,
+          purchaseDate: purchaseDate,
+          monthGroup: monthStr,
+          itemName: selectedItemName,
+          vendorName: selectedVendorName,
+          quantity: parseFloat(qty),
+          unit: unit,
+          rate: parseFloat(rate),
+          total: calculatedTotal,
+          remarks: remarks.trim() || undefined,
+        }
+        return updatedRecord
+      }
+      return p
+    })
 
     updatePurchases(updated)
+    if (updatedRecord) {
+      savePurchaseToDb(updatedRecord)
+    }
     setIsEditOpen(false)
     setEditingPurchase(null)
     toast.success(`Purchase entry for ${selectedItemName} updated!`)
@@ -1077,6 +1093,14 @@ export default function PurchasesPage() {
 
     const nextPurchases = [...newEntries, ...updatedPurchases]
     updatePurchases(nextPurchases)
+    savePurchasesToDb(newEntries)
+    if (mergedEntries.length > 0) {
+      const mergedIds = new Set(mergedEntries.map((m) => m.existingId))
+      const mergedRecordsToSync = updatedPurchases.filter((p) => mergedIds.has(p.id))
+      if (mergedRecordsToSync.length > 0) {
+        savePurchasesToDb(mergedRecordsToSync)
+      }
+    }
     setSelectedFY("ALL")
 
     // --- Automatic Sync with Item Master and Vendor Master ---
